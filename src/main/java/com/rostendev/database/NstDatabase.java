@@ -2,7 +2,9 @@ package com.rostendev.database;
 
 import com.rostendev.database.index.BPlusTree;
 import com.rostendev.database.index.IndexEntry;
+import com.rostendev.database.schema.DataType;
 
+import javax.xml.crypto.Data;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
@@ -19,13 +21,13 @@ public class NstDatabase {
     private final Path filePath;
     private final Path indexPath;
 
-    private NstDatabase(Path filePath) throws IOException {
+    private NstDatabase(Path filePath, DataType keyType) throws IOException {
         this.filePath = filePath;
         this.indexPath = Path.of(filePath.toString() + ".idx");
-        this.index = new BPlusTree(indexPath);
+        this.index = new BPlusTree(indexPath, keyType);
     }
 
-    public static NstDatabase open(String fileName) throws IOException {
+    public static NstDatabase open(String fileName, DataType keyType) throws IOException {
 
        Path path = Path.of(fileName + ".nst");
 
@@ -41,7 +43,7 @@ public class NstDatabase {
                 System.out.println("Abriendo base de datos existente: " + path);
             }
         }
-        return new NstDatabase(path);
+        return new NstDatabase(path, keyType);
     }
 
     public void insert(int id, String data) throws IOException     {

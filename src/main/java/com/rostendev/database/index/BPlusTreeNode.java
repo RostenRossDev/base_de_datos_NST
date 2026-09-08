@@ -2,6 +2,7 @@ package com.rostendev.database.index;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public class BPlusTreeNode {
     public static final int LEAF = 1;
@@ -17,7 +18,7 @@ public class BPlusTreeNode {
     private final List<IndexEntry> entries;
 
     // Para nodos internos
-    private final List<Integer> keys;
+    private final List<Object> keys;
     private final List<Integer> children;
 
     public BPlusTreeNode(int pageNumber, int nodeType) {
@@ -85,7 +86,7 @@ public class BPlusTreeNode {
         return entries;
     }
 
-    public List<Integer> getKeys() {
+    public List<Object> getKeys() {
         return keys;
     }
 
@@ -103,7 +104,9 @@ public class BPlusTreeNode {
 
     @Override
     public String toString() {
+
         if (isLeaf()) {
+
             return "Leaf{" +
                     "page=" + pageNumber +
                     ", parent=" + parentPage +

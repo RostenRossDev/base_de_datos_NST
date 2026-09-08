@@ -1,5 +1,7 @@
 package com.rostendev.database.index;
 
+import com.rostendev.database.schema.DataType;
+
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -7,49 +9,84 @@ import java.util.List;
 
 public class BPlusTree {
     private final IndexFile indexFile;
+    private final DataType keyType;
     private static final int MAX_LEAF_ENTRIES = 3;
     private static final int MAX_INTERNAL_KEYS = 3;
 
-    public BPlusTree(Path indexPath) throws IOException {
-        this.indexFile = new IndexFile(indexPath);
+    public BPlusTree(Path indexPath, DataType keyType) throws IOException {
+        if (keyType == null) throw new IllegalArgumentException("keyType no puede ser null");
+        this.keyType = keyType;
+        this.indexFile = new IndexFile( indexPath,keyType);
     }
 
-    public void insert(int id, int dataPage, int dataSlot) throws IOException {
-        IndexEntry entry = new IndexEntry(id, dataPage, dataSlot);
+    public void insert(Object  key, int dataPage, int dataSlot) throws IOException {
+        IndexEntry entry = new IndexEntry(key, dataPage, dataSlot);
+        IndexKey.validate(key,keyType);
 
         //1. Empezamos en la raiz
         BPlusTreeNode node = indexFile.readNode(indexFile.getRootPage());
 
         //2. Bjamos hasta encontrar una hoja.
         while(node.isInternal()){
-            int childPage = findChildPage(node, id);
+            int childPage = findChildPage(node, key);
             node = indexFile.readNode(childPage);
         }
+
         //3. Ahora "node" es la hoja correcta
         insertIntoLeaf(node, entry);
     }
 
-    public IndexEntry search(int id) throws IOException {
+    public IndexEntry search(Object  key) throws IOException {
         BPlusTreeNode node = indexFile.readNode(indexFile.getRootPage());
-
+        IndexKey.validate(key,keyType);
         //bajamos desde la raiz hasta uan hoja.
         while(node.isInternal()){
-            int childPage = findChildPage(node, id);
+            int childPage = findChildPage(node, key);
             node = indexFile.readNode(childPage);
         }
-        //Estamos en una hora
+        //Estamos en una hoja
         for (IndexEntry entry : node.getEntries()){
+            int comparison = IndexKey.compare(entry.getKey(),key,keyType);
             //encontramos y retornamos el entry
-            if (entry.getId() == id) return entry;
+            if (comparison == 0) return entry;
 
             //Como la hoja esta ordenada, si ya pasamos el id podemos terminar.
-            if (entry.getId() > id) return null;
+            if (comparison > 0) return null;
         }
 
         return null;
     }
 
-    private int findChildPage(BPlusTreeNode node, int id){
+    public void delete(Object key) throws IOException {
+        if (key == null) throw new IllegalArgumentException("La clave no puede ser null");
+        IndexKey.validate(key, keyType);
+        BPlusTreeNode leaf = findLeaf(key);
+        int position = findKeyPosition(leaf, key);
+        if (position == -1) return;
+        leaf.getEntries().remove(position);
+        leaf.updateKeyCount();
+        indexFile.writeNode(leaf);
+    }
+
+    private BPlusTreeNode findLeaf(Object key) throws IOException {
+        BPlusTreeNode node = indexFile.readNode(indexFile.getRootPage());
+        while (node.isInternal()) {
+            int childPage = findChildPage(node, key);
+            node = indexFile.readNode(childPage);
+        }
+        return node;
+    }
+
+    private int findKeyPosition(BPlusTreeNode leaf, Object key){
+        for (int i = 0; i < leaf.getEntries().size(); i++) {
+            Object currentKey = leaf.getEntries().get(i).getKey();
+            int comparison = IndexKey.compare(currentKey, key, keyType);
+            if (comparison == 0) return i;
+            if (comparison > 0) return  -1;
+        }
+        return -1;
+    }
+    private int findChildPage(BPlusTreeNode node, Object  key){
         /*
         * * Ejemplo:
         *  * keys:
@@ -61,32 +98,32 @@ public class BPlusTree {
         *  * ID 40 -> child 2
         *  * ID 50 -> child 3
         *  * ID 70 -> child 3 */
-        List<Integer> keys = node.getKeys();
+        List<Object> keys = node.getKeys();
         List<Integer> children = node.getChildren();
         int position = 0;
-        while(position < keys.size() && id >= keys.get(position)){
+        while(position < keys.size() && IndexKey.compare(key,keys.get(position),keyType) >= 0){
             position++;
         }
-
         return children.get(position);
     }
     private void insertIntoLeaf(BPlusTreeNode leaf, IndexEntry entry) throws IOException {
         int position = 0;
         while(position < leaf.getEntries().size()
-                && leaf.getEntries().get(position).getId() < entry.getId()){
+                && IndexKey.compare(leaf.getEntries().get(position).getKey(),entry.getKey(),keyType) < 0){
             position++;
         }
 
         // No permitimos IDs duplicados
         if (position < leaf.getEntries().size()
-            && leaf.getEntries().get(position).getId() == entry.getId()) {
-            throw new IllegalArgumentException("El id ya existe: " + entry.getId());
+            && IndexKey.compare(leaf.getEntries().get(position).getKey(),entry.getKey(),keyType) == 0) {
+            throw new IllegalArgumentException("El id ya existe: " + entry.getKey());
         }
 
         leaf.getEntries().add(position, entry);
 
         //todavia entra en la hoja
         if (leaf.getEntries().size() <= MAX_LEAF_ENTRIES) {
+            leaf.updateKeyCount();
             indexFile.writeNode(leaf);
             return;
         }
@@ -119,7 +156,7 @@ public class BPlusTree {
         /* * La hoja antigua deja de ser root.
         /* * La primera clave de la nueva hoja
         * será el separador que subiremos al padre. */
-        int separator = newLeaf.getEntries().get(0).getId();
+        Object  separator = newLeaf.getEntries().get(0).getKey();
         /* * Guardamos las hojas. */
         indexFile.writeNode(oldLeaf);
         indexFile.writeNode(newLeaf);
@@ -136,7 +173,7 @@ public class BPlusTree {
         }
     }
 
-    private void createNewRoot(BPlusTreeNode leftLeaf, BPlusTreeNode rigthLeaf, int separator) throws IOException{
+    private void createNewRoot(BPlusTreeNode leftLeaf, BPlusTreeNode rigthLeaf, Object  separator) throws IOException{
         int newRootPage = indexFile.allocatePage();
         BPlusTreeNode newRoot = new BPlusTreeNode(newRootPage, BPlusTreeNode.INTERNAL);
         newRoot.getKeys().add(separator);
@@ -152,7 +189,7 @@ public class BPlusTree {
         indexFile.setRootPage(newRootPage);
     }
 
-    private void insertIntoParent(BPlusTreeNode leftChild, BPlusTreeNode rigthChild, int separator) throws IOException {
+    private void insertIntoParent(BPlusTreeNode leftChild, BPlusTreeNode rigthChild, Object  separator) throws IOException {
         BPlusTreeNode parent = indexFile.readNode(leftChild.getParentPage());
 
         /*Encontramos donde estaba el hijo izquierdo*/
@@ -187,11 +224,11 @@ public class BPlusTree {
           [30|50]  [90]
         */
 
-        List<Integer> keys = oldNode.getKeys();
+        List<Object > keys = oldNode.getKeys();
         List<Integer> children = oldNode.getChildren();
 
         int middle = keys.size() / 2;
-        int separator = keys.get(middle);
+        Object separator = keys.get(middle);
         int newPage = indexFile.allocatePage();
         BPlusTreeNode newNode = new BPlusTreeNode(newPage, BPlusTreeNode.INTERNAL);
         /* * Claves de la derecha.

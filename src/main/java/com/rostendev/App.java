@@ -1,18 +1,13 @@
 package com.rostendev;
 
-import com.rostendev.database.Table;
-import com.rostendev.database.constants.Constants;
+import com.rostendev.database.table.Table;
 import com.rostendev.database.schema.DataType;
 import com.rostendev.database.records.Record;
-import com.rostendev.database.records.RecordSerializer;
 import com.rostendev.database.schema.ColumnDefinition;
 import com.rostendev.database.schema.Schema;
 import com.rostendev.database.storage.*;
 
-import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 
 /**
  * Hello world!
@@ -21,222 +16,189 @@ import java.util.Arrays;
 public class App {
     public static void main( String[] args )  throws Exception {
 
-//        Schema schema = new Schema("test");
-//        schema.addColumn(new ColumnDefinition("byteValue", DataType.BYTE, null, false,false,false,false));
-//        schema.addColumn(new ColumnDefinition("shortValue", DataType.SHORT, null, false,false,false,false));
-//        schema.addColumn(new ColumnDefinition("intValue", DataType.INT, null, false,false,false,false));
-//        schema.addColumn(new ColumnDefinition("LongValue", DataType.LONG, null, false,false,false,false));
-//        schema.addColumn(new ColumnDefinition("doubleValue", DataType.DOUBLE, null, false,false,false,false));
-//        schema.addColumn(new ColumnDefinition("stringValue", DataType.STRING, 50, false,false,false,false));
-//        schema.addColumn(new ColumnDefinition("bigDecimalValue", DataType.BIGDECIMAL, null, false,false,false,false));
-//        schema.addColumn(new ColumnDefinition("bitIntValue", DataType.BIGINT, null, false,false,false,false));
-//
-//        Record record = new Record(schema);
-//
-//        record.set(0, (byte) 10);
-//        record.set(1, (short) 1000);
-//        record.set(2, 50000);
-//        record.set(3, 9999999999L);
-//        record.set(4, 123.456);
-//        record.set(5, "Hola");
-//        record.set(6, new BigDecimal("123456789.12345"));
-//        record.set(7, new BigInteger("123456789012345678901234567890"));
-//
-//        RecordSerializer serializer =
-//                new RecordSerializer();
-//
-//        byte[] data =
-//                serializer.serialize(record);
-//
-//        System.out.println(
-//                "Bytes: " + data.length
-//        );
-//
-//        Record restored =
-//                serializer.deserialize(data, schema);
-//
-//        for (int i = 0;
-//             i < restored.getSchema().getColumns().size();
-//             i++) {
-//
-//            System.out.println(
-//                    restored.getSchema()
-//                            .getColumns()
-//                            .get(i)
-//                            .getName()
-//                            + " = "
-//                            + restored.get(i)
-//            );
-//        }
-        Schema schema = new Schema("Persona");
+        try {
 
-        schema.addColumn(new ColumnDefinition(
-                "id",
-                DataType.LONG,
-                null,
-                false,
-                true,
-                false,
-                true
-        ));
+            /* =====================================================
+             * SCHEMA
+             * ===================================================== */
 
-        schema.addColumn(new ColumnDefinition(
-                "nombre",
-                DataType.STRING,
-                100,
-                false,
-                false,
-                false,
-                false
-        ));
+            Schema schema = new Schema("persona");
 
-        schema.addColumn(new ColumnDefinition(
-                "edad",
-                DataType.INT,
-                null,
-                true,
-                false,
-                false,
-                false
-        ));
+            schema.addColumn(new ColumnDefinition(
+                    "id",
+                    DataType.BIGINT,
+                    50,
+                    false,
+                    true,
+                    false,
+                    true
+            ));
 
-        schema.addColumn(new ColumnDefinition(
-                "activo",
-                DataType.BOOLEAN,
-                null,
-                false,
-                false,
-                false,
-                false
-        ));
+            schema.addColumn(new ColumnDefinition(
+                    "nombre",
+                    DataType.STRING,
+                    100,
+                    false,
+                    false,
+                    false,
+                    false
+            ));
 
-        Table table = new Table(
-                "mi_base",
-                "public",
-                schema
-        );
+            schema.addColumn(new ColumnDefinition(
+                    "edad",
+                    DataType.INT,
+                    null,
+                    true,
+                    false,
+                    false,
+                    false
+            ));
 
-        /*
-         * =========================
-         * INSERTAR REGISTROS
-         * =========================
-         */
-
-        Record persona1 = new Record(schema);
-        persona1.set(0, 1L);
-        persona1.set(1, "Juan");
-        persona1.set(2, 35);
-        persona1.set(3, true);
-
-        RecordPointer pointer1 =
-                table.insert(persona1);
+            schema.addColumn(new ColumnDefinition(
+                    "activo",
+                    DataType.BOOLEAN,
+                    null,
+                    false,
+                    false,
+                    false,
+                    false
+            ));
 
 
-        Record persona2 = new Record(schema);
-        persona2.set(0, 2L);
-        persona2.set(1, "Pedro");
-        persona2.set(2, 28);
-        persona2.set(3, true);
+            /* =====================================================
+             * TABLE
+             * ===================================================== */
 
-        RecordPointer pointer2 =
-                table.insert(persona2);
-
-
-        /*
-         * Este tiene edad NULL.
-         */
-
-        Record persona3 = new Record(schema);
-        persona3.set(0, 3L);
-        persona3.set(1, "Maria");
-        persona3.set(2, null);
-        persona3.set(3, false);
-
-        RecordPointer pointer3 =
-                table.insert(persona3);
-
-
-        /*
-         * =========================
-         * MOSTRAR POINTERS
-         * =========================
-         */
-
-        System.out.println("POINTERS:");
-
-        System.out.println(
-                "Juan  -> " + pointer1
-        );
-
-        System.out.println(
-                "Pedro -> " + pointer2
-        );
-
-        System.out.println(
-                "Maria -> " + pointer3
-        );
-
-
-        /*
-         * =========================
-         * LEER REGISTROS
-         * =========================
-         */
-
-        System.out.println("\nREGISTROS:");
-
-        printRecord(
-                table.read(pointer1),
-                schema
-        );
-
-        printRecord(
-                table.read(pointer2),
-                schema
-        );
-
-        printRecord(
-                table.read(pointer3),
-                schema
-        );
-
-
-        /*
-         * =========================
-         * INFORMACIÓN DE LA TABLA
-         * =========================
-         */
-
-        System.out.println("\nARCHIVO:");
-
-        System.out.println(
-                "Páginas: "
-                        + table.getDataFile().getPageCount()
-        );
-
-
-        table.close();
-    }
-
-    private static void printRecord(
-            Record record,
-            Schema schema) {
-
-        for (int i = 0;
-             i < schema.getColumns().size();
-             i++) {
-
-            System.out.println(
-                    schema.getColumns()
-                            .get(i)
-                            .getName()
-                            + " = "
-                            + record.get(i)
+            Table table = new Table(
+                    "mi_database",
+                    "public_string",
+                    schema
             );
+
+
+            /* =====================================================
+             * INSERT JUAN
+             * ===================================================== */
+
+            Record juan = new Record(schema);
+
+            juan.set(0, new BigInteger("123456789012345678901234567890123456789"));
+            juan.set(1, "Juan");
+            juan.set(2, 30);
+            juan.set(3, true);
+
+//            RecordPointer pointerJuan = table.insert(juan);
+//
+//            System.out.println("Juan insertado:");
+//            System.out.println(pointerJuan);
+
+
+            /* =====================================================
+             * INSERT PEDRO
+             * ===================================================== */
+
+            Record pedro = new Record(schema);
+
+            pedro.set(0, new BigInteger("123456789012345678901234567890123456788"));
+            pedro.set(1, "Pedro");
+            pedro.set(2, 25);
+            pedro.set(3, false);
+
+//            RecordPointer pointerPedro = table.insert(pedro);
+//
+//            System.out.println("\nPedro insertado:");
+//            System.out.println(pointerPedro);
+
+
+            /* =====================================================
+             * FIND JUAN
+             * ===================================================== */
+
+            Record resultJuan = table.find(new BigInteger("123456789012345678901234567890123456789"));
+
+            System.out.println("\nResultado búsqueda Juan:");
+
+            if (resultJuan != null) {
+
+                System.out.println("ID: " + resultJuan.get(0));
+                System.out.println("Nombre: " + resultJuan.get(1));
+                System.out.println("Edad: " + resultJuan.get(2));
+                System.out.println("Activo: " + resultJuan.get(3));
+
+            } else {
+
+                System.out.println("Juan no encontrado");
+            }
+
+
+            /* =====================================================
+             * FIND PEDRO
+             * ===================================================== */
+
+            Record resultPedro = table.find(new BigInteger("123456789012345678901234567890123456788"));
+
+            System.out.println("\nResultado búsqueda Pedro:");
+
+            if (resultPedro != null) {
+
+                System.out.println("ID: " + resultPedro.get(0));
+                System.out.println("Nombre: " + resultPedro.get(1));
+                System.out.println("Edad: " + resultPedro.get(2));
+                System.out.println("Activo: " + resultPedro.get(3));
+
+            } else {
+
+                System.out.println("Pedro no encontrado");
+            }
+
+
+            /* =====================================================
+             * FIND INEXISTENTE
+             * ===================================================== */
+
+            Record result = table.find(new BigInteger("123456789012345678901234567890123456787"));
+
+            System.out.println("\nBúsqueda ID inexistente:");
+
+            if (result == null) {
+                System.out.println("No encontrado");
+            } else {
+                System.out.println("ERROR: encontró un registro que no existe");
+            }
+
+
+            /* =====================================================
+             * PK DUPLICADA
+             * ===================================================== */
+
+            System.out.println("\nProbando PK duplicada:");
+
+            try {
+
+                Record duplicate = new Record(schema);
+
+                duplicate.set(0, new BigInteger("123456789012345678901234567890123456789"));
+                duplicate.set(1, "Otro");
+                duplicate.set(2, 50);
+                duplicate.set(3, true);
+
+                table.insert(duplicate);
+
+                System.out.println(
+                        "ERROR: permitió una PK duplicada"
+                );
+
+            } catch (IllegalArgumentException e) {
+
+                System.out.println(
+                        "Correcto: " + e.getMessage()
+                );
+            }
+
+
+        } catch (Exception e) {
+
+            e.printStackTrace();
         }
-
-        System.out.println();
-
-
     }
 }
