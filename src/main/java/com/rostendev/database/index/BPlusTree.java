@@ -5,7 +5,9 @@ import com.rostendev.database.schema.DataType;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class BPlusTree {
     private final IndexFile indexFile;
@@ -76,8 +78,12 @@ public class BPlusTree {
         IndexKey.validate(key, keyType);
         // 1. Encontramos la hoja
         BPlusTreeNode leaf = findLeaf(key);
+
+
         // 2. Buscamos la clave
         int position = findKeyPosition(leaf, key);
+
+
         // La clave no existe
         if (position == -1) return;
         // 3. Eliminamos la entrada
@@ -133,7 +139,20 @@ public class BPlusTree {
         List<Object> keys = node.getKeys();
         List<Integer> children = node.getChildren();
         int position = 0;
-        while (position < keys.size() && IndexKey.compare(key, keys.get(position), keyType) >= 0) {
+//        while (position < keys.size() && IndexKey.compare(key, keys.get(position), keyType) >= 0) {
+//            position++;
+//        }
+        while (position < keys.size()) {
+
+            int comparison = IndexKey.compare(
+                    key,
+                    keys.get(position),
+                    keyType
+            );
+            if (comparison < 0) {
+                break;
+            }
+
             position++;
         }
         return children.get(position);
@@ -265,7 +284,11 @@ public class BPlusTree {
 
         List<Object> keys = oldNode.getKeys();
         List<Integer> children = oldNode.getChildren();
-
+        System.out.println(
+                "SPLIT INTERNAL: page=" + oldNode.getPageNumber()
+                        + " children ANTES=" + oldNode.getChildren()
+                        + " keys ANTES=" + oldNode.getKeys()
+        );
         int middle = keys.size() / 2;
         Object separator = keys.get(middle);
         int newPage = indexFile.allocatePage();
@@ -276,6 +299,7 @@ public class BPlusTree {
         for (int i = middle + 1; i < keys.size(); i++) {
             newNode.getKeys().add(keys.get(i));
         }
+
         /* * Hijos de la derecha.
          *  * Si tenemos:
          *  * keys = [30 50 70 90]
@@ -300,11 +324,21 @@ public class BPlusTree {
         newNode.setParentPage(oldNode.getParentPage());
 
         /* * Todos los hijos que pasaron al nuevo nodo ahora tienen otro padre. */
+        for (int childPage : oldNode.getChildren()) {
+            BPlusTreeNode child = indexFile.readNode(childPage);
+            child.setParentPage(oldNode.getPageNumber());
+            indexFile.writeNode(child);
+        }
         for (int childPage : newNode.getChildren()) {
             BPlusTreeNode child = indexFile.readNode(childPage);
             child.setParentPage(newPage);
             indexFile.writeNode(child);
         }
+        System.out.println(
+                "SPLIT INTERNAL: page=" + oldNode.getPageNumber()
+                        + " children IZQ=" + oldNode.getChildren()
+                        + " children DER=" + newNode.getChildren()
+        );
         oldNode.updateKeyCount();
         newNode.updateKeyCount();
         indexFile.writeNode(oldNode);
@@ -313,6 +347,12 @@ public class BPlusTree {
         /* * ¿El nodo dividido era la raíz? */
         if (oldNode.getParentPage() == -1) {
             createNewRoot(oldNode, newNode, separator);
+            System.out.println(
+                    "NUEVA RAIZ: oldNode=" + oldNode.getPageNumber()
+                            + " children=" + oldNode.getChildren()
+                            + " newNode=" + newNode.getPageNumber()
+                            + " children=" + newNode.getChildren()
+            );
         } else {
             insertIntoParent(oldNode, newNode, separator);
         }
@@ -321,7 +361,6 @@ public class BPlusTree {
     private void rebalanceLeaf(BPlusTreeNode leaf) throws IOException {
         BPlusTreeNode parent = indexFile.readNode(leaf.getParentPage());
         int position = parent.getChildren().indexOf(leaf.getPageNumber());
-
         /* Primero intentamos pedirle al hermano izquierdo. */
         if (position > 0) {
             BPlusTreeNode leftSibling = indexFile.readNode(parent.getChildren().get(position - 1));
@@ -350,7 +389,7 @@ public class BPlusTree {
                 indexFile.writeNode(leaf);
                 rebuildKeys(parent);
                 indexFile.writeNode(parent);
-                refresParentKeys(parent);
+                refreshParentKeys(parent);
                 return;
             }
         }
@@ -358,18 +397,27 @@ public class BPlusTree {
         if (position > 0) {
             // Fusionamos leaf dentro del izquierdo
             BPlusTreeNode leftSibling = indexFile.readNode(parent.getChildren().get(position - 1));
-            leftSibling.getEntries().addAll(leftSibling.getEntries());
+            // Guardamos el siguiente del nodo que desaparece
+            int nextPage = leaf.getNextPage();
+            // Fusionamos
+            leftSibling.getEntries().addAll(leaf.getEntries());
+            // ahora leftSibling debe apuntar al siguiente de leaf
+            leftSibling.setNextPage(nextPage);
             leftSibling.updateKeyCount();
             indexFile.writeNode(leftSibling);
             parent.getChildren().remove(position);
             rebuildKeys(parent);
             indexFile.writeNode(parent);
             rebalanceInternal(parent);
+            return;
         } else {
             /* Somos el primer hijo. Fusionamos el derecho dentro
              * de nosotros para que el primer leaf siga siendo el mismo.*/
             BPlusTreeNode rightSibling = indexFile.readNode(parent.getChildren().get(position + 1));
             leaf.getEntries().addAll(rightSibling.getEntries());
+            // MUY IMPORTANTE:
+            // el nuevo leaf salta al siguiente del rightSibling
+            leaf.setNextPage(rightSibling.getNextPage());
             leaf.updateKeyCount();
             indexFile.writeNode(leaf);
             parent.getChildren().remove(position + 1);
@@ -407,17 +455,18 @@ public class BPlusTree {
         int position = parent.getChildren().indexOf(node.getPageNumber());
         //PEDIR AL HERMANO IZQUIERDO =====================================================
         if (position > 0) {
-            BPlusTreeNode leftSibling = indexFile.readNode(parent.getChildren().get(position -1));
+            BPlusTreeNode leftSibling = indexFile.readNode(parent.getChildren().get(position - 1));
             if (leftSibling.getChildren().size() > MIN_INTERNAL_CHILDREN) {
-                int borrowedChildPage = leftSibling.getChildren().remove(leftSibling.getChildren().size() -1);
+                int borrowedChildPage = leftSibling.getChildren().remove(leftSibling.getChildren().size() - 1);
                 node.getChildren().add(0, borrowedChildPage);
                 BPlusTreeNode borrowedChild = indexFile.readNode(borrowedChildPage);
+                borrowedChild.setParentPage(node.getPageNumber());
                 indexFile.writeNode(borrowedChild);
                 rebuildKeys(leftSibling);
                 rebuildKeys(node);
-                rebuildKeys(parent);
                 indexFile.writeNode(leftSibling);
                 indexFile.writeNode(node);
+                rebuildKeys(parent);
                 indexFile.writeNode(parent);
                 refreshParentKeys(parent);
                 return;
@@ -428,46 +477,21 @@ public class BPlusTree {
         // PEDIR AL HERMANO DERECHO
         // =====================================================
 
-        if (position
-                < parent.getChildren().size() - 1) {
-
-            BPlusTreeNode rightSibling =
-                    indexFile.readNode(
-                            parent.getChildren()
-                                    .get(position + 1)
-                    );
-
-            if (rightSibling.getChildren().size()
-                    > MIN_INTERNAL_CHILDREN) {
-
-                int borrowedChildPage =
-                        rightSibling.getChildren()
-                                .remove(0);
-
-                node.getChildren()
-                        .add(borrowedChildPage);
-
-                BPlusTreeNode borrowedChild =
-                        indexFile.readNode(
-                                borrowedChildPage
-                        );
-
-                borrowedChild.setParentPage(
-                        node.getPageNumber()
-                );
-
+        if (position < parent.getChildren().size() - 1) {
+            BPlusTreeNode rightSibling = indexFile.readNode(parent.getChildren().get(position + 1));
+            if (rightSibling.getChildren().size() > MIN_INTERNAL_CHILDREN) {
+                int borrowedChildPage = rightSibling.getChildren().remove(0);
+                node.getChildren().add(borrowedChildPage);
+                BPlusTreeNode borrowedChild = indexFile.readNode(borrowedChildPage);
+                borrowedChild.setParentPage(node.getPageNumber());
                 indexFile.writeNode(borrowedChild);
-
                 rebuildKeys(rightSibling);
                 rebuildKeys(node);
-                rebuildKeys(parent);
-
                 indexFile.writeNode(rightSibling);
                 indexFile.writeNode(node);
+                rebuildKeys(parent);
                 indexFile.writeNode(parent);
-
                 refreshParentKeys(parent);
-
                 return;
             }
         }
@@ -567,45 +591,24 @@ public class BPlusTree {
     // REBUILD KEYS
     // =========================================================
 
-    private void rebuildKeys(
-            BPlusTreeNode node) throws IOException {
-
-        if (!node.isInternal()) {
-            return;
-        }
-
+    private void rebuildKeys(BPlusTreeNode node) throws IOException {
+        if (!node.isInternal()) return;
         node.getKeys().clear();
 
         /*
          * Si tenemos:
-         *
          * children:
-         *
          * [A, B, C]
-         *
          * necesitamos:
-         *
          * keys:
-         *
          * [first(B), first(C)]
          */
-        for (int i = 1;
-             i < node.getChildren().size();
-             i++) {
-
-            int childPage =
-                    node.getChildren().get(i);
-
-            BPlusTreeNode child =
-                    indexFile.readNode(childPage);
-
-            Object firstKey =
-                    getFirstKey(child);
-
-            node.getKeys()
-                    .add(firstKey);
+        for (int i = 1; i < node.getChildren().size(); i++) {
+            int childPage = node.getChildren().get(i);
+            BPlusTreeNode child = indexFile.readNode(childPage);
+            Object firstKey = getFirstKey(child);
+            node.getKeys().add(firstKey);
         }
-
         node.updateKeyCount();
     }
 
@@ -613,44 +616,19 @@ public class BPlusTree {
     // =========================================================
     // GET FIRST KEY
     // =========================================================
-
-    private Object getFirstKey(
-            BPlusTreeNode node) throws IOException {
-
-        /*
-         * Hoja:
-         * la primera entrada contiene
-         * directamente la primera clave.
-         */
+    private Object getFirstKey(BPlusTreeNode node) throws IOException {
+        /* Hoja: la primera entrada contiene directamente la primera clave.*/
         if (node.isLeaf()) {
+            if (node.getEntries().isEmpty())
+                throw new IllegalStateException("Una hoja no puede estar vacía al buscar su primera clave");
 
-            if (node.getEntries().isEmpty()) {
-                throw new IllegalStateException(
-                        "Una hoja no puede estar vacía al buscar su primera clave"
-                );
-            }
-
-            return node.getEntries()
-                    .get(0)
-                    .getKey();
+            return node.getEntries().get(0).getKey();
         }
+        /* Nodo interno: su primera clave está en el hijo más a la izquierda.*/
+        if (node.getChildren().isEmpty())
+            throw new IllegalStateException("Nodo interno sin hijos");
 
-        /*
-         * Nodo interno:
-         * su primera clave está en el
-         * hijo más a la izquierda.
-         */
-        if (node.getChildren().isEmpty()) {
-            throw new IllegalStateException(
-                    "Nodo interno sin hijos"
-            );
-        }
-
-        BPlusTreeNode firstChild =
-                indexFile.readNode(
-                        node.getChildren().get(0)
-                );
-
+        BPlusTreeNode firstChild = indexFile.readNode(node.getChildren().get(0));
         return getFirstKey(firstChild);
     }
 
@@ -659,28 +637,250 @@ public class BPlusTree {
     // REFRESH PARENT KEYS
     // =========================================================
 
-    private void refreshParentKeys(
-            BPlusTreeNode node) throws IOException {
+    private void refreshParentKeys(BPlusTreeNode node) throws IOException {
+        int parentPage = node.getParentPage();
+        if (parentPage == -1) return;
+        BPlusTreeNode parent = indexFile.readNode(parentPage);
+        rebuildKeys(parent);
+        indexFile.writeNode(parent);
+        /* Si cambió la primera clave de un subárbol, el cambio puede necesitar propagarse hacia arriba.*/
+        refreshParentKeys(parent);
+    }
 
-        int parentPage =
-                node.getParentPage();
+    public void printTree() throws IOException {
+        int rootPage = indexFile.getRootPage();
+        printNode(rootPage, 0);
+    }
 
-        if (parentPage == -1) {
+    private void printNode(int pageNumber, int level) throws IOException {
+        BPlusTreeNode node = indexFile.readNode(pageNumber);
+        String indent = "  ".repeat(level);
+        if (node.isInternal()) {
+            for (int childPage : node.getChildren()) {
+                printNode(childPage, level + 1);
+            }
+        }
+    }
+
+    // VALIDATE TREE =========================================================
+    public void validateTree() throws IOException {
+        int rootPage = indexFile.getRootPage();
+        if (rootPage < 0) throw new IllegalStateException("ROOT PAGE inválida: " + rootPage);
+        BPlusTreeNode root = indexFile.readNode(rootPage);
+        // La raíz siempre debe tener parent = -1
+        if (root.getParentPage() != -1)
+            throw new IllegalStateException("La raíz tiene parentPage=" + root.getParentPage()
+                    + " en lugar de -1");
+        Set<Integer> visitedNodes = new HashSet<>();
+        List<Integer> leafPages = new ArrayList<>();
+        List<Object> allKeys = new ArrayList<>();
+        // Guarda el nivel en el que encontramos
+        // la primera hoja.
+        int[] leafLevel = {-1};
+        validateNode(root, true, 0, visitedNodes, leafPages, allKeys, leafLevel);
+        // Verificamos la lista enlazada de hojas.
+        validateLeafChain(leafPages);
+        // Verificamos que todas las claves estén
+        // globalmente ordenadas.
+        validateGlobalKeyOrder(allKeys);
+    }
+
+    // VALIDATE NODE =========================================================
+    private void validateNode(BPlusTreeNode node, boolean isRoot, int level,
+                              Set<Integer> visitedNodes, List<Integer> leafPages,
+                              List<Object> allKeys, int[] leafLevel) throws IOException {
+        int page = node.getPageNumber();
+        // Un nodo no puede aparecer dos veces
+        // dentro del mismo árbol.
+        if (!visitedNodes.add(page))
+            throw new IllegalStateException("Nodo visitado más de una vez: página " + page);
+
+        System.out.println(
+                "VALIDANDO nodo=" + page
+                        + " parent=" + node.getParentPage()
+                        + " root=" + isRoot
+                        + " tipo=" + (node.isLeaf() ? "LEAF" : "INTERNAL")
+        );
+        // HOJA // -----------------------------------------------------
+        if (node.isLeaf()) {
+            validateLeaf(node, isRoot, level, leafPages, allKeys, leafLevel);
             return;
         }
+        // NODO INTERNO -----------------------------------------------------
+        validateInternal(node, isRoot);
+        // Validamos todos sus hijos.
+        for (int childPage : node.getChildren()) {
+            BPlusTreeNode child = indexFile.readNode(childPage);
+            // El hijo debe apuntar nuevamente
+            // hacia este nodo.
+            if (child.getParentPage() != node.getPageNumber()) {
+                System.out.println(
+                        "ERROR PARENT: nodo=" + node.getPageNumber()
+                                + " parentActual=" + node.getParentPage()
+                                + " parentEsperado=" + node.getPageNumber()
+                );
+                throw new IllegalStateException("Parent incorrecto: nodo " + childPage + " indica parent=" + child.getParentPage() + " pero debería ser " + node.getPageNumber());
+            }
+            validateNode(child, false, level + 1, visitedNodes, leafPages, allKeys, leafLevel);
+        }
+    }
 
-        BPlusTreeNode parent =
-                indexFile.readNode(parentPage);
+    // VALIDATE INTERNAL NODE // =========================================================
+    private void validateInternal(BPlusTreeNode node, boolean isRoot) throws IOException {
+        int keyCount = node.getKeys().size();
+        int childCount = node.getChildren().size();
+        // Regla fundamental:
+        //
+        // children = keys + 1
+        //
+        if (childCount != keyCount + 1)
+            throw new IllegalStateException("Nodo interno página " + node.getPageNumber()
+                    + " inválido: keys=" + keyCount + ", children=" + childCount
+                    + ". Debe cumplirse children = keys + 1");
 
-        rebuildKeys(parent);
+        // Los nodos internos normales
+        // deben cumplir el mínimo.
+        if (!isRoot && childCount < MIN_INTERNAL_CHILDREN)
+            throw new IllegalStateException("Underflow interno en página " + node.getPageNumber()
+                    + ": children=" + childCount + ", mínimo=" + MIN_INTERNAL_CHILDREN);
 
-        indexFile.writeNode(parent);
+        // Nunca debería existir un nodo
+        // con más claves que el máximo.
+        if (keyCount > MAX_INTERNAL_KEYS)
+            throw new IllegalStateException("Overflow interno en página " + node.getPageNumber()
+                    + ": keys=" + keyCount + ", máximo=" + MAX_INTERNAL_KEYS);
 
-        /*
-         * Si cambió la primera clave de un
-         * subárbol, el cambio puede necesitar
-         * propagarse hacia arriba.
-         */
-        refreshParentKeys(parent);
+        // Una raíz interna necesita
+        // al menos dos hijos.
+        if (isRoot && childCount < 2)
+            throw new IllegalStateException("La raíz interna tiene menos de 2 hijos: "
+                    + childCount);
+
+        // Las claves del nodo deben estar ordenadas.
+        validateKeyOrder(node.getKeys(), "claves del nodo interno " + node.getPageNumber());
+        /* * Las claves separadoras deben coincidir  con la primera clave de cada hijo derecho.
+         * * children [A, B, C]
+         * * keys [first(B), first(C)] */
+        for (int i = 1; i < node.getChildren().size(); i++) {
+            BPlusTreeNode child = indexFile.readNode(node.getChildren().get(i));
+            Object expected = getFirstKey(child);
+            Object actual = node.getKeys().get(i - 1);
+            if (IndexKey.compare(actual, expected, keyType) != 0)
+                throw new IllegalStateException("Separador incorrecto en nodo " + node.getPageNumber()
+                        + ": keys[" + (i - 1) + "]=" + actual + " pero firstKey(child[" + i
+                        + "])=" + expected);
+        }
+    }
+
+    // VALIDATE LEAF // =========================================================
+    private void validateLeaf(BPlusTreeNode leaf, boolean isRoot, int level, List<Integer> leafPages,
+                              List<Object> allKeys, int[] leafLevel) {
+        // Todas las hojas deben estar
+        // exactamente en el mismo nivel.
+        if (leafLevel[0] == -1) leafLevel[0] = level;
+        else if (leafLevel[0] != level)
+            throw new IllegalStateException("Las hojas no están en el mismo nivel: " + "hoja " +
+                    leaf.getPageNumber() + " está en nivel " + level +
+                    ", pero las anteriores están en nivel " + leafLevel[0]);
+
+        // Una hoja que no es raíz debe
+        // respetar el mínimo.
+        if (!isRoot && leaf.getEntries().size() < MIN_LEAF_ENTRIES)
+            throw new IllegalStateException("Underflow en hoja " + leaf.getPageNumber()
+                    + ": entries=" + leaf.getEntries().size() + ", mínimo="
+                    + MIN_LEAF_ENTRIES);
+
+        // Una hoja no puede superar
+        // su capacidad máxima.
+        if (leaf.getEntries().size() > MAX_LEAF_ENTRIES)
+            throw new IllegalStateException("Overflow en hoja " + leaf.getPageNumber() + ": entries=" + leaf.getEntries().size() + ", máximo=" + MAX_LEAF_ENTRIES);
+
+        // Las claves de la hoja deben estar ordenadas.
+        List<Object> keys = new ArrayList<>();
+        for (IndexEntry entry : leaf.getEntries()) {
+            keys.add(entry.getKey()); allKeys.add(entry.getKey());
+        }
+        validateKeyOrder( keys, "claves de hoja " + leaf.getPageNumber() );
+        // Guardamos la hoja para validar
+        // posteriormente la cadena nextPage.
+        leafPages.add( leaf.getPageNumber() );
+    }
+
+    // VALIDATE KEY ORDER =========================================================
+    private void validateKeyOrder( List<Object> keys, String description) {
+        for (int i = 1; i < keys.size(); i++) {
+            Object previous = keys.get(i - 1);
+            Object current = keys.get(i);
+            int comparison = IndexKey.compare( previous, current, keyType );
+            if (comparison >= 0)
+                throw new IllegalStateException( "Claves desordenadas en " + description + ": " + previous + " >= " + current );
+        }
+    }
+
+    // VALIDATE GLOBAL KEY ORDER =========================================================
+    private void validateGlobalKeyOrder( List<Object> keys) {
+        for (int i = 1; i < keys.size(); i++) { Object previous = keys.get(i - 1);
+            Object current = keys.get(i);
+            int comparison = IndexKey.compare( previous, current, keyType );
+            if (comparison >= 0)
+                throw new IllegalStateException( "Orden global incorrecto: " + previous + " >= "+ current );
+        }
+    }
+
+    // VALIDATE LEAF CHAIN =========================================================
+    private void validateLeafChain( List<Integer> treeLeafPages) throws IOException {
+        if (treeLeafPages.isEmpty())
+            throw new IllegalStateException( "El árbol no contiene ninguna hoja" );
+        /* * Buscamos la primera hoja.
+        * * No podemos asumir que la primera página física sea la primera hoja.
+        * * Buscamos una hoja cuyo parent no tenga * otro hijo a su izquierda.
+        */
+        int firstLeafPage = treeLeafPages.get(0);
+        for (int page : treeLeafPages) {
+            BPlusTreeNode leaf = indexFile.readNode(page);
+            if (leaf.getParentPage() == -1) {
+                firstLeafPage = page;
+                break;
+            }
+            BPlusTreeNode parent = indexFile.readNode( leaf.getParentPage());
+            int position = parent.getChildren().indexOf(page);
+            if (position == 0)
+                firstLeafPage = page; break;
+        }
+        Set<Integer> visitedLeaves = new HashSet<>();
+        int currentPage = firstLeafPage;
+        Object previousKey = null;
+        while (currentPage != -1) {
+            // Detectamos ciclos.
+            if (!visitedLeaves.add(currentPage))
+                throw new IllegalStateException( "La cadena de hojas contiene un ciclo. "
+                        + "Página repetida: " + currentPage );
+            BPlusTreeNode leaf = indexFile.readNode( currentPage );
+            // Esta página debe ser una hoja.
+            if (!leaf.isLeaf())
+                throw new IllegalStateException( "nextPage apunta a un nodo interno: "
+                        + currentPage );
+            for (IndexEntry entry : leaf.getEntries()) {
+                Object currentKey = entry.getKey();
+                if (previousKey != null) {
+                    int comparison = IndexKey.compare( previousKey, currentKey, keyType );
+                    if (comparison >= 0)
+                        throw new IllegalStateException( "Orden incorrecto en cadena de hojas: "
+                                + previousKey + " >= " + currentKey );
+                }
+                previousKey = currentKey;
+            }
+            currentPage = leaf.getNextPage();
+        }
+        /* * La cantidad de hojas alcanzadas mediante nextPage debe coincidir con la cantidad de
+        hojas encontradas * desde la raíz. */
+        if ( visitedLeaves.size() != treeLeafPages.size() )
+            throw new IllegalStateException( "Cadena de hojas incompleta: "
+                    + "desde el árbol se encontraron " + treeLeafPages.size()
+                    + " hojas, pero nextPage recorrió " + visitedLeaves.size() );
+        // Todas las hojas del árbol deben aparecer exactamente una vez.
+        if ( !visitedLeaves.containsAll( treeLeafPages ) )
+            throw new IllegalStateException( "La cadena nextPage no contiene "
+                    + "todas las hojas del árbol" );
     }
 }

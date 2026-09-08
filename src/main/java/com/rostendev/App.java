@@ -1,5 +1,8 @@
 package com.rostendev;
 
+import com.rostendev.database.index.BPlusTree;
+import com.rostendev.database.index.IndexEntry;
+import com.rostendev.database.index.IndexFile;
 import com.rostendev.database.table.Table;
 import com.rostendev.database.schema.DataType;
 import com.rostendev.database.records.Record;
@@ -7,196 +10,258 @@ import com.rostendev.database.schema.ColumnDefinition;
 import com.rostendev.database.schema.Schema;
 import com.rostendev.database.storage.*;
 
+import java.io.IOException;
 import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /**
  * Hello world!
  *
  */
 public class App {
-    public static void main( String[] args )  throws Exception {
-
+    public static void main(String[] args) throws IOException {
         try {
 
-            /* =====================================================
-             * SCHEMA
-             * ===================================================== */
+            Path indexPath =Paths.get("test-index.idx");
 
-            Schema schema = new Schema("persona");
+            // Empezamos siempre con un archivo limpio.
+            Files.deleteIfExists(indexPath);
 
-            schema.addColumn(new ColumnDefinition(
-                    "id",
-                    DataType.BIGINT,
-                    50,
-                    false,
-                    true,
-                    false,
-                    true
-            ));
+            IndexFile indexFile = new IndexFile(indexPath, DataType.INT);
 
-            schema.addColumn(new ColumnDefinition(
-                    "nombre",
-                    DataType.STRING,
-                    100,
-                    false,
-                    false,
-                    false,
-                    false
-            ));
+            BPlusTree tree =new BPlusTree(indexPath,DataType.INT);
 
-            schema.addColumn(new ColumnDefinition(
-                    "edad",
-                    DataType.INT,
-                    null,
-                    true,
-                    false,
-                    false,
-                    false
-            ));
+            // =====================================================
+            // 1. INSERTAR 1 -> 100
+            // =====================================================
 
-            schema.addColumn(new ColumnDefinition(
-                    "activo",
-                    DataType.BOOLEAN,
-                    null,
-                    false,
-                    false,
-                    false,
-                    false
-            ));
+            System.out.println(
+                    "\n========================================"
+            );
+            System.out.println(
+                    " PRUEBA 1: INSERT 1 -> 100"
+            );
+            System.out.println(
+                    "========================================"
+            );
 
+            for (int i = 1; i <= 100; i++) {
+                tree.insert(i, i ,i);
+                tree.validateTree();
+            }
 
-            /* =====================================================
-             * TABLE
-             * ===================================================== */
-
-            Table table = new Table(
-                    "mi_database",
-                    "public_string",
-                    schema
+            System.out.println(
+                    "OK: INSERT 1 -> 100"
             );
 
 
-            /* =====================================================
-             * INSERT JUAN
-             * ===================================================== */
+            // =====================================================
+            // 2. BUSCAR 1 -> 100
+            // =====================================================
 
-            Record juan = new Record(schema);
+            System.out.println(
+                    "\n========================================"
+            );
+            System.out.println(
+                    " PRUEBA 2: SEARCH 1 -> 100"
+            );
+            System.out.println(
+                    "========================================"
+            );
 
-            juan.set(0, new BigInteger("123456789012345678901234567890123456789"));
-            juan.set(1, "Juan");
-            juan.set(2, 30);
-            juan.set(3, true);
+            for (int i = 1; i <= 100; i++) {
 
-//            RecordPointer pointerJuan = table.insert(juan);
-//
-//            System.out.println("Juan insertado:");
-//            System.out.println(pointerJuan);
+                IndexEntry entry =
+                        tree.search(i);
 
+                if (entry == null) {
 
-            /* =====================================================
-             * INSERT PEDRO
-             * ===================================================== */
-
-            Record pedro = new Record(schema);
-
-            pedro.set(0, new BigInteger("123456789012345678901234567890123456788"));
-            pedro.set(1, "Pedro");
-            pedro.set(2, 25);
-            pedro.set(3, false);
-
-//            RecordPointer pointerPedro = table.insert(pedro);
-//
-//            System.out.println("\nPedro insertado:");
-//            System.out.println(pointerPedro);
-
-
-            /* =====================================================
-             * FIND JUAN
-             * ===================================================== */
-
-            Record resultJuan = table.find(new BigInteger("123456789012345678901234567890123456789"));
-
-            System.out.println("\nResultado búsqueda Juan:");
-
-            if (resultJuan != null) {
-
-                System.out.println("ID: " + resultJuan.get(0));
-                System.out.println("Nombre: " + resultJuan.get(1));
-                System.out.println("Edad: " + resultJuan.get(2));
-                System.out.println("Activo: " + resultJuan.get(3));
-
-            } else {
-
-                System.out.println("Juan no encontrado");
+                    throw new IllegalStateException(
+                            "No se encontró la clave " + i
+                    );
+                }
             }
 
-
-            /* =====================================================
-             * FIND PEDRO
-             * ===================================================== */
-
-            Record resultPedro = table.find(new BigInteger("123456789012345678901234567890123456788"));
-
-            System.out.println("\nResultado búsqueda Pedro:");
-
-            if (resultPedro != null) {
-
-                System.out.println("ID: " + resultPedro.get(0));
-                System.out.println("Nombre: " + resultPedro.get(1));
-                System.out.println("Edad: " + resultPedro.get(2));
-                System.out.println("Activo: " + resultPedro.get(3));
-
-            } else {
-
-                System.out.println("Pedro no encontrado");
-            }
+            System.out.println(
+                    "OK: todas las claves fueron encontradas"
+            );
 
 
-            /* =====================================================
-             * FIND INEXISTENTE
-             * ===================================================== */
+            // =====================================================
+            // 3. DELETE SELECTIVO
+            //    2,4,6,...,100
+            // =====================================================
 
-            Record result = table.find(new BigInteger("123456789012345678901234567890123456787"));
+            System.out.println(
+                    "\n========================================"
+            );
+            System.out.println(
+                    " PRUEBA 3: DELETE SELECTIVO"
+            );
+            System.out.println(
+                    "========================================"
+            );
 
-            System.out.println("\nBúsqueda ID inexistente:");
-
-            if (result == null) {
-                System.out.println("No encontrado");
-            } else {
-                System.out.println("ERROR: encontró un registro que no existe");
-            }
-
-
-            /* =====================================================
-             * PK DUPLICADA
-             * ===================================================== */
-
-            System.out.println("\nProbando PK duplicada:");
-
-            try {
-
-                Record duplicate = new Record(schema);
-
-                duplicate.set(0, new BigInteger("123456789012345678901234567890123456789"));
-                duplicate.set(1, "Otro");
-                duplicate.set(2, 50);
-                duplicate.set(3, true);
-
-                table.insert(duplicate);
+            for (int i = 2; i <= 100; i += 2) {
 
                 System.out.println(
-                        "ERROR: permitió una PK duplicada"
+                        "\n========== DELETE " + i + " =========="
                 );
 
-            } catch (IllegalArgumentException e) {
+                tree.delete(i);
 
-                System.out.println(
-                        "Correcto: " + e.getMessage()
-                );
+                tree.printTree();
+
+                tree.validateTree();
             }
 
+            // Verificamos que los pares hayan desaparecido.
+            for (int i = 2; i <= 100; i += 2) {
+
+                if (tree.search(i) != null) {
+
+                    throw new IllegalStateException(
+                            "La clave eliminada sigue existiendo: "
+                                    + i
+                    );
+                }
+            }
+
+            // Verificamos que los impares sigan existiendo.
+            for (int i = 1; i <= 100; i += 2) {
+
+                if (tree.search(i) == null) {
+
+                    throw new IllegalStateException(
+                            "La clave existente desapareció: "
+                                    + i
+                    );
+                }
+            }
+
+            System.out.println(
+                    "OK: DELETE SELECTIVO"
+            );
+
+
+            // =====================================================
+            // 4. DELETE RESTANTES
+            //    99,97,95,...,1
+            // =====================================================
+
+            System.out.println(
+                    "\n========================================"
+            );
+            System.out.println(
+                    " PRUEBA 4: DELETE RESTANTES INVERSO"
+            );
+            System.out.println(
+                    "========================================"
+            );
+
+            for (int i = 99; i >= 1; i -= 2) {
+
+                tree.delete(i);
+
+                tree.validateTree();
+            }
+
+            System.out.println(
+                    "OK: todas las claves fueron eliminadas"
+            );
+
+
+            // =====================================================
+            // 5. INSERTAR NUEVAMENTE EN ORDEN INVERSO
+            // =====================================================
+
+            System.out.println(
+                    "\n========================================"
+            );
+            System.out.println(
+                    " PRUEBA 5: INSERT 100 -> 1"
+            );
+            System.out.println(
+                    "========================================"
+            );
+
+            for (int i = 100; i >= 1; i--) {
+
+                tree.insert(i,i,i);
+
+                tree.validateTree();
+            }
+
+            System.out.println(
+                    "OK: INSERT 100 -> 1"
+            );
+
+
+            // =====================================================
+            // 6. DELETE 100 -> 1
+            // =====================================================
+
+            System.out.println(
+                    "\n========================================"
+            );
+            System.out.println(
+                    " PRUEBA 6: DELETE 100 -> 1"
+            );
+            System.out.println(
+                    "========================================"
+            );
+
+            for (int i = 100; i >= 1; i--) {
+
+                tree.delete(i);
+
+                tree.validateTree();
+            }
+
+            System.out.println(
+                    "OK: DELETE 100 -> 1"
+            );
+
+
+            // =====================================================
+            // 7. ESTADO FINAL
+            // =====================================================
+
+            System.out.println(
+                    "\n========================================"
+            );
+            System.out.println(
+                    " ESTADO FINAL"
+            );
+            System.out.println(
+                    "========================================"
+            );
+
+            tree.printTree();
+
+            tree.validateTree();
+
+            System.out.println(
+                    "\n========================================"
+            );
+            System.out.println(
+                    " TODAS LAS PRUEBAS COMPLETADAS"
+            );
+            System.out.println(
+                    "========================================"
+            );
+
+        } catch (IOException e) {
+
+            e.printStackTrace();
 
         } catch (Exception e) {
+
+            System.err.println(
+                    "\n===== ERROR EN LA PRUEBA ====="
+            );
 
             e.printStackTrace();
         }
