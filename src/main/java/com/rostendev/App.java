@@ -1,269 +1,215 @@
 package com.rostendev;
 
-import com.rostendev.database.index.BPlusTree;
-import com.rostendev.database.index.IndexEntry;
-import com.rostendev.database.index.IndexFile;
-import com.rostendev.database.table.Table;
+import com.rostendev.database.database.DataBase;
+import com.rostendev.database.storage.freeSpaceManager.FreeSpaceEntry;
+import com.rostendev.database.storage.freeSpaceManager.FreeSpaceMap;
 import com.rostendev.database.schema.DataType;
 import com.rostendev.database.records.Record;
 import com.rostendev.database.schema.ColumnDefinition;
 import com.rostendev.database.schema.Schema;
 import com.rostendev.database.storage.*;
+import com.rostendev.database.table.Table;
 
+import javax.swing.table.TableCellEditor;
+import java.io.File;
 import java.io.IOException;
-import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.List;
 
 /**
  * Hello world!
  *
  */
 public class App {
-    public static void main(String[] args) throws IOException {
-        try {
+    public static void main(String[] args) throws Exception {
 
-            Path indexPath =Paths.get("test-index.idx");
+        System.out.println("=== CREANDO DATABASE ===");
 
-            // Empezamos siempre con un archivo limpio.
-            Files.deleteIfExists(indexPath);
+        DataBase db = DataBase.create("universidad");
 
-            IndexFile indexFile = new IndexFile(indexPath, DataType.INT);
+        System.out.println("Database creada:");
+        System.out.println(db.getDatabasePath());
 
-            BPlusTree tree =new BPlusTree(indexPath,DataType.INT);
 
-            // =====================================================
-            // 1. INSERTAR 1 -> 100
-            // =====================================================
+        System.out.println("\n=== CREANDO NAMESPACE ===");
 
+        Namespace namespace = db.createNamespace("public");
+
+        System.out.println("Namespace creado:");
+        System.out.println(namespace.getNamespacePath());
+
+
+        System.out.println("\n=== CREANDO SCHEMA ===");
+
+        Schema schema = new Schema("persona");
+
+        schema.addColumn(
+                new ColumnDefinition(
+                        "id",
+                        DataType.INT,
+                        null,
+                        false,
+                        true,
+                        false,
+                        true
+                )
+        );
+
+        schema.addColumn(
+                new ColumnDefinition(
+                        "nombre",
+                        DataType.STRING,
+                        100,
+                        false,
+                        false,
+                        false,
+                        false
+                )
+        );
+
+        schema.addColumn(
+                new ColumnDefinition(
+                        "edad",
+                        DataType.INT,
+                        null,
+                        true,
+                        false,
+                        false,
+                        false
+                )
+        );
+
+        System.out.println("Schema creado:");
+        System.out.println("Tabla: " + schema.getTableName());
+
+        for (ColumnDefinition column : schema.getColumns()) {
             System.out.println(
-                    "\n========================================"
+                    " - "
+                            + column.getName()
+                            + " | "
+                            + column.getType()
+                            + " | length="
+                            + column.getLength()
+                            + " | nullable="
+                            + column.isNullable()
+                            + " | primaryKey="
+                            + column.isPrimaryKey()
+                            + " | foreignKey="
+                            + column.isForeignKey()
+                            + " | unique="
+                            + column.isUnique()
             );
-            System.out.println(
-                    " PRUEBA 1: INSERT 1 -> 100"
-            );
-            System.out.println(
-                    "========================================"
-            );
-
-            for (int i = 1; i <= 100; i++) {
-                tree.insert(i, i ,i);
-                tree.validateTree();
-            }
-
-            System.out.println(
-                    "OK: INSERT 1 -> 100"
-            );
-
-
-            // =====================================================
-            // 2. BUSCAR 1 -> 100
-            // =====================================================
-
-            System.out.println(
-                    "\n========================================"
-            );
-            System.out.println(
-                    " PRUEBA 2: SEARCH 1 -> 100"
-            );
-            System.out.println(
-                    "========================================"
-            );
-
-            for (int i = 1; i <= 100; i++) {
-
-                IndexEntry entry =
-                        tree.search(i);
-
-                if (entry == null) {
-
-                    throw new IllegalStateException(
-                            "No se encontró la clave " + i
-                    );
-                }
-            }
-
-            System.out.println(
-                    "OK: todas las claves fueron encontradas"
-            );
-
-
-            // =====================================================
-            // 3. DELETE SELECTIVO
-            //    2,4,6,...,100
-            // =====================================================
-
-            System.out.println(
-                    "\n========================================"
-            );
-            System.out.println(
-                    " PRUEBA 3: DELETE SELECTIVO"
-            );
-            System.out.println(
-                    "========================================"
-            );
-
-            for (int i = 2; i <= 100; i += 2) {
-
-                System.out.println(
-                        "\n========== DELETE " + i + " =========="
-                );
-
-                tree.delete(i);
-
-                tree.printTree();
-
-                tree.validateTree();
-            }
-
-            // Verificamos que los pares hayan desaparecido.
-            for (int i = 2; i <= 100; i += 2) {
-
-                if (tree.search(i) != null) {
-
-                    throw new IllegalStateException(
-                            "La clave eliminada sigue existiendo: "
-                                    + i
-                    );
-                }
-            }
-
-            // Verificamos que los impares sigan existiendo.
-            for (int i = 1; i <= 100; i += 2) {
-
-                if (tree.search(i) == null) {
-
-                    throw new IllegalStateException(
-                            "La clave existente desapareció: "
-                                    + i
-                    );
-                }
-            }
-
-            System.out.println(
-                    "OK: DELETE SELECTIVO"
-            );
-
-
-            // =====================================================
-            // 4. DELETE RESTANTES
-            //    99,97,95,...,1
-            // =====================================================
-
-            System.out.println(
-                    "\n========================================"
-            );
-            System.out.println(
-                    " PRUEBA 4: DELETE RESTANTES INVERSO"
-            );
-            System.out.println(
-                    "========================================"
-            );
-
-            for (int i = 99; i >= 1; i -= 2) {
-
-                tree.delete(i);
-
-                tree.validateTree();
-            }
-
-            System.out.println(
-                    "OK: todas las claves fueron eliminadas"
-            );
-
-
-            // =====================================================
-            // 5. INSERTAR NUEVAMENTE EN ORDEN INVERSO
-            // =====================================================
-
-            System.out.println(
-                    "\n========================================"
-            );
-            System.out.println(
-                    " PRUEBA 5: INSERT 100 -> 1"
-            );
-            System.out.println(
-                    "========================================"
-            );
-
-            for (int i = 100; i >= 1; i--) {
-
-                tree.insert(i,i,i);
-
-                tree.validateTree();
-            }
-
-            System.out.println(
-                    "OK: INSERT 100 -> 1"
-            );
-
-
-            // =====================================================
-            // 6. DELETE 100 -> 1
-            // =====================================================
-
-            System.out.println(
-                    "\n========================================"
-            );
-            System.out.println(
-                    " PRUEBA 6: DELETE 100 -> 1"
-            );
-            System.out.println(
-                    "========================================"
-            );
-
-            for (int i = 100; i >= 1; i--) {
-
-                tree.delete(i);
-
-                tree.validateTree();
-            }
-
-            System.out.println(
-                    "OK: DELETE 100 -> 1"
-            );
-
-
-            // =====================================================
-            // 7. ESTADO FINAL
-            // =====================================================
-
-            System.out.println(
-                    "\n========================================"
-            );
-            System.out.println(
-                    " ESTADO FINAL"
-            );
-            System.out.println(
-                    "========================================"
-            );
-
-            tree.printTree();
-
-            tree.validateTree();
-
-            System.out.println(
-                    "\n========================================"
-            );
-            System.out.println(
-                    " TODAS LAS PRUEBAS COMPLETADAS"
-            );
-            System.out.println(
-                    "========================================"
-            );
-
-        } catch (IOException e) {
-
-            e.printStackTrace();
-
-        } catch (Exception e) {
-
-            System.err.println(
-                    "\n===== ERROR EN LA PRUEBA ====="
-            );
-
-            e.printStackTrace();
         }
+
+
+        System.out.println("\n=== CREANDO TABLE ===");
+
+        Table table = namespace.createTable(schema);
+
+        System.out.println("Table creada:");
+        System.out.println(table.getName());
+
+
+        System.out.println("\n=== VERIFICANDO ESTRUCTURA FISICA ===");
+
+        Path tablePath = namespace
+                .getNamespacePath()
+                .resolve(schema.getTableName());
+
+        Path dataPath =
+                tablePath.resolve(schema.getTableName() + ".data");
+
+        Path schemaPath =
+                tablePath.resolve(schema.getTableName() + ".schema");
+
+        Path indexPath =
+                tablePath.resolve(schema.getTableName() + ".index");
+
+        Path fsmPath =
+                tablePath.resolve(schema.getTableName() + ".fsm");
+
+
+        System.out.println(
+                "Database : "
+                        + db.getDatabasePath()
+                        + " -> "
+                        + Files.exists(db.getDatabasePath())
+        );
+
+        System.out.println(
+                "Namespace: "
+                        + namespace.getNamespacePath()
+                        + " -> "
+                        + Files.exists(namespace.getNamespacePath())
+        );
+
+        System.out.println(
+                "Table    : "
+                        + tablePath
+                        + " -> "
+                        + Files.exists(tablePath)
+        );
+
+        System.out.println(
+                "Data     : "
+                        + dataPath
+                        + " -> "
+                        + Files.exists(dataPath)
+        );
+
+        System.out.println(
+                "Schema   : "
+                        + schemaPath
+                        + " -> "
+                        + Files.exists(schemaPath)
+        );
+
+        System.out.println(
+                "Index    : "
+                        + indexPath
+                        + " -> "
+                        + Files.exists(indexPath)
+        );
+
+        System.out.println(
+                "FSM      : "
+                        + fsmPath
+                        + " -> "
+                        + Files.exists(fsmPath)
+        );
+
+
+        System.out.println("\n=== ESTRUCTURA COMPLETA ===");
+
+        Files.walk(db.getDatabasePath())
+                .forEach(System.out::println);
+
+
+        table.close();
+        namespace.close();
+        db.close();
+
+        System.out.println("\n=== TEST FINALIZADO ===");
+    }
+
+    private static void deleteDirectory(File directory) {
+
+        File[] files = directory.listFiles();
+
+        if (files == null) {
+            return;
+        }
+
+        for (File file : files) {
+
+            if (file.isDirectory()) {
+                deleteDirectory(file);
+            } else {
+                file.delete();
+            }
+        }
+
+        directory.delete();
     }
 }

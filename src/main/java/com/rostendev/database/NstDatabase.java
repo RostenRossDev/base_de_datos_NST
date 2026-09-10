@@ -1,5 +1,6 @@
 package com.rostendev.database;
 
+import com.rostendev.database.constants.Constants;
 import com.rostendev.database.index.BPlusTree;
 import com.rostendev.database.index.IndexEntry;
 import com.rostendev.database.schema.DataType;
@@ -13,7 +14,7 @@ import java.nio.file.Path;
 public class NstDatabase {
     private static final String MAGIC = "NST1"; //Formato de archivo de los datos
     private static final int VERSION = 1; //Version de archivo
-    private static final int PAGE_SIZE = 4096; //tamaño de cada pagina
+    private static final int PAGE_SIZE = Constants.PAGE_SIZE; //tamaño de cada pagina
     private static final int HEADER_SIZE = 20;
     private static final int PAGE_HEADER_SIZE = 16;
 

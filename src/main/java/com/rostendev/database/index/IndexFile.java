@@ -1,5 +1,6 @@
 package com.rostendev.database.index;
 
+import com.rostendev.database.constants.Constants;
 import com.rostendev.database.schema.DataType;
 
 import java.io.IOException;
@@ -13,7 +14,7 @@ import java.nio.file.Path;
 public class IndexFile {
     private static final String MAGIC = "IDX2";
     private static final int VERSION = 2;
-    private static final int PAGE_SIZE = 4096;
+    private static final int PAGE_SIZE = Constants.PAGE_SIZE;
     private static final int METADATA_PAGE = 0;
     private static final int FIRST_NODE_PAGE = 1;
     private static final int NODE_HEADER_SIZE = 16;
@@ -243,29 +244,10 @@ public class IndexFile {
             throw new IOException("Archivo de índice inválido. MAGIC esperado: "
                             + MAGIC + ", encontrado: " + storedMagic);
 
-
-        int version =
-                file.readInt();
-
-        if (version != VERSION) {
-
-            throw new IOException(
-                    "Versión de índice no compatible: "
-                            + version
-            );
-        }
-
-        int pageSize =
-                file.readInt();
-
-        if (pageSize != PAGE_SIZE) {
-
-            throw new IOException(
-                    "PAGE_SIZE incompatible: "
-                            + pageSize
-            );
-        }
-
+        int version =file.readInt();
+        if (version != VERSION) throw new IOException("Versión de índice no compatible: "+ version);
+        int pageSize =file.readInt();
+        if (pageSize != PAGE_SIZE) throw new IOException("PAGE_SIZE incompatible: "+ pageSize);
         /*
          * Saltamos:
          *
@@ -273,30 +255,14 @@ public class IndexFile {
          * firstLeaf
          * pageCount
          */
-
         file.skipBytes(12);
-
-        int storedKeyType =
-                file.readInt();
-
-        DataType storedType =
-                DataType.values()[storedKeyType];
-
-        if (storedType != keyType) {
-
-            throw new IOException(
-                    "El tipo de clave del índice es "
-                            + storedType
-                            + " pero se esperaba "
-                            + keyType
-            );
-        }
+        int storedKeyType = file.readInt();
+        DataType storedType = DataType.values()[storedKeyType];
+        if (storedType != keyType) throw new IOException("El tipo de clave del índice es "+ storedType
+                            + " pero se esperaba "+ keyType);
     }
 
-    private void writeKey(
-            RandomAccessFile file,
-            Object key)
-            throws IOException {
+    private void writeKey(RandomAccessFile file,Object key) throws IOException {
 
         IndexKey.validate(
                 key,
@@ -413,9 +379,7 @@ public class IndexFile {
         }
     }
 
-    private Object readKey(
-            RandomAccessFile file)
-            throws IOException {
+    private Object readKey(RandomAccessFile file) throws IOException {
 
         switch (keyType) {
             case BYTE:

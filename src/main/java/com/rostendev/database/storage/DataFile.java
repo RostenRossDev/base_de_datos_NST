@@ -4,6 +4,7 @@ import com.rostendev.database.constants.Constants;
 import com.rostendev.database.records.Record;
 import com.rostendev.database.records.RecordSerializer;
 import com.rostendev.database.schema.Schema;
+import com.rostendev.database.storage.freeSpaceManager.FreeSpaceMap;
 
 import java.io.Closeable;
 import java.io.File;
@@ -14,6 +15,8 @@ public class DataFile implements Closeable {
     private final RandomAccessFile file;
     private final PageSerializer pageSerializer;
     private final Schema schema;
+    private final RecordSerializer recordSerializer;
+    private final FreeSpaceMap freeSpaceMap;
 
     public DataFile(String path, Schema schema) throws IOException {
         if (path == null || path.isBlank()) throw new IllegalArgumentException("Path no puede ser nulo o vacio.");
@@ -27,7 +30,21 @@ public class DataFile implements Closeable {
         this.file = new RandomAccessFile(path, "rw");
         this.pageSerializer = new PageSerializer();
         this.schema = schema;
+        this.recordSerializer = new RecordSerializer();
+
+        String fsmPath;
+
+        if (path.endsWith(".data")) {
+            fsmPath =
+                    path.substring(0, path.length() - ".data".length())
+                            + ".fsm";
+        } else {
+            fsmPath = path + ".fsm";
+        }
+
+        this.freeSpaceMap = new FreeSpaceMap(fsmPath);
     }
+
 
     /**
      * Agrega un registro al final del archivo.
@@ -43,6 +60,25 @@ public class DataFile implements Closeable {
      *
      * @return offset donde comienza el registro
      */
+    public RecordPointer insert(Record record) throws IOException {
+        if (record == null) throw new IllegalArgumentException("record no puede ser null");
+        if (record.getSchema() != schema) throw new IllegalArgumentException("El Record pertenece a otro Schema");
+        byte[] recordData = recordSerializer.serialize(record);
+
+        /* Buscamos una página existente que pueda almacenar el registro.*/
+        Page page = findPageForInsert(recordData);
+
+        /*No encontramos ninguna página disponible. Creamos una nueva.*/
+        if (page == null) page = new Page(getPageCount());
+
+
+        /*Page se encarga de: reutilizar un slot libre, o crear un slot nuevo.*/
+        RecordPointer pointer = page.insert(recordData);
+
+        /* Persistimos inmediatamente la página. */
+        write(page);
+        return pointer;
+    }
 
     public long write(Page page) throws IOException {
         byte[] bytes = pageSerializer.serialize(page);
@@ -97,6 +133,14 @@ public class DataFile implements Closeable {
         return file.length();
     }
 
+    private Page findPageForInsert(byte[] recordData) throws IOException {
+        int pageCount = getPageCount();
+        for (int pageId = 0; pageId < pageCount; pageId++) {
+            Page page = read(pageId);
+            if (page.canFit(recordData.length)) return page;
+        }
+        return null;
+    }
 
     /**cierra el archivo**/
     @Override

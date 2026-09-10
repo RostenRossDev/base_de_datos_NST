@@ -2,6 +2,7 @@ package com.rostendev.database.storage;
 
 import com.rostendev.database.constants.Constants;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -34,6 +35,27 @@ public class Page {
     public RecordPointer insert(byte[] recordData) {
         if (recordData == null) throw new IllegalArgumentException("data no puede ser null.");
         if (recordData.length == 0)  throw new IllegalArgumentException("No se puede insertar un registro vacio.");
+        /* * ==========================================
+        * * 1. BUSCAR SLOT LIBRE REUTILIZABLE
+        * * ========================================== */
+
+        for (short slotId = 0; slotId < slots.size(); slotId++) {
+            Slot slot = slots.get(slotId);
+            if (slot.isFree()) {
+                if (recordData.length > getFreeSpace()) throw new IllegalArgumentException("No hay espacio en la pagina");
+                int recordOffset = freeEnd - recordData.length;
+                System.arraycopy(recordData, 0, data, recordOffset, recordData.length);
+                /*Reutilizamos el mismo slot. eL SLOTiD NO CAMBI*/
+                slot.setOffset(recordOffset);
+                slot.setLength(recordData.length);
+                freeEnd = recordOffset;
+                return  new RecordPointer(pageId, slotId);
+            }
+        }
+        /* * ==========================================
+        * * 2. NO HAY SLOT REUTILIZABLE
+        * * ========================================== */
+
         /*
          * Necesitamos espacio para:
          *
@@ -82,9 +104,11 @@ public class Page {
     }
 
     /*Indica si existe espacio sufucuetne para un nuevo registro*/
-    public boolean canFit(int dataLenth){
-        if (dataLenth <= 0) return false;
-        return dataLenth + Constants.SLOT_SIZE <= getFreeSpace();
+    public boolean canFit(int dataLength){
+        if (dataLength <= 0) return false;
+        boolean hasFreeSlot = slots.stream().anyMatch(Slot::isFree);
+        if (hasFreeSlot) return dataLength <= getFreeSpace();
+        return dataLength + Constants.SLOT_SIZE <= getFreeSpace();
     }
 
     public int getPageId() {
@@ -136,12 +160,41 @@ public class Page {
      * Por ahora no compactamos la página.
      */
     public void delete(short slotId) {
-        Slot slot = getSlot(slotId);
+        Slot deletedSlot  = getSlot(slotId);
+        if (deletedSlot.isFree()) {
+            throw new IllegalArgumentException("El slot ya está libre");
+        }
+        int deletedOffset = deletedSlot.getOffset();
+        int deletedLength = deletedSlot.getLength();
+
+        /* Los registros están almacenados desde freeEnd hacia
+         * offsets cada vez mayores.
+         *
+         * El bloque que está "debajo" del registro eliminado
+         * se mueve una sola vez para cerrar el espacio.*/
+        int blockStart = freeEnd;
+        int blockLength = deletedOffset - blockStart;
+        if (blockLength > 0) {
+            System.arraycopy(data, blockStart, data, blockStart + deletedLength, blockLength);
+
+            /* Todos los registros que estaban por debajo del
+             * eliminado cambiaron de offset.*/
+            for (Slot slot : slots) {
+                if (!slot.isFree() && slot.getOffset() < deletedOffset) {
+                    slot.setOffset(slot.getOffset() + deletedLength);
+                }
+            }
+        }
         /*
-         * Por ahora no movemos registros.
-         * Simplemente marcamos el slot como libre.
+         * El espacio liberado queda nuevamente al final
+         * del área de registros.
          */
-        slot.setLength(0);
+        freeEnd += deletedLength;
+
+        /*
+         * Conservamos el slot para poder reutilizar su ID.
+         */
+        deletedSlot.setLength(0);
     }
 
     public int getSlotCount(){
@@ -151,6 +204,13 @@ public class Page {
     public byte[] getData() {
         return data;
     }
+
+    public int getInsertableSpace() {
+        boolean hasFreeSlot = slots.stream().anyMatch(Slot::isFree);
+        if (hasFreeSlot) return getFreeSpace();
+        return Math.max(0,getFreeSpace() - Constants.SLOT_SIZE);
+    }
+
 
     @Override
     public String toString() {

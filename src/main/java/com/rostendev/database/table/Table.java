@@ -7,8 +7,9 @@ import com.rostendev.database.records.Record;
 import com.rostendev.database.records.RecordSerializer;
 import com.rostendev.database.schema.ColumnDefinition;
 import com.rostendev.database.schema.Schema;
+import com.rostendev.database.schema.SchemaFile;
 import com.rostendev.database.storage.DataFile;
-import com.rostendev.database.storage.FreeSpaceManager;
+import com.rostendev.database.storage.freeSpaceManager.FreeSpaceManager;
 import com.rostendev.database.storage.Page;
 import com.rostendev.database.storage.RecordPointer;
 
@@ -32,10 +33,14 @@ public class Table {
 
         /*Ruta Fisica*/
         this.databasePath = new DatabasePath(dbName, namespace, name);
+
+        //Crear el archivo de schema y el data file
+        SchemaFile schemaFile =new SchemaFile(databasePath.getSchemaPath().toString());
+        schemaFile.write(schema);
         this.dataFile = new DataFile(databasePath.getDataPath().toString(), schema);
 
         /*free space*/
-        this.freeSpaceManager = new FreeSpaceManager(dataFile);
+        this.freeSpaceManager = new FreeSpaceManager(dataFile, databasePath.getFsmPath().toString());
 
         /*PRIMARY KEY =========================  */
         this.primaryKeyColumn =  findPrimaryKeyColumn();
@@ -73,7 +78,9 @@ public class Table {
 
         /*Persistimos la pagina*/
         dataFile.write(page);
-
+        System.out.println("FSM -> page=" + page.getPageId()+ " freeSpace=" + page.getFreeSpace()
+                        + " insertable=" + page.getInsertableSpace());
+        freeSpaceManager.updatePage(page);
         /* INSERTAR EN B+TREE ========================= */
         index.insert(primaryKey, pointer.getPageId(), pointer.getSlotId());
         return pointer;

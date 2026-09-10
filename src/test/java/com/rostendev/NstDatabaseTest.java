@@ -11,7 +11,6 @@ public class NstDatabaseTest {
     @Test
     public void crearBaseDeDatos() throws IOException {
 
-        NstDatabase db = NstDatabase.open("personas");
 
     }
 }

@@ -13,6 +13,7 @@ public class DatabasePath {
     private final String databaseName;
     private final String namespaceName;
     private final String tableName;
+    private final Path fsmPath;
 
     public DatabasePath(String dbName, String namespacesName, String tableName){
 
@@ -25,8 +26,23 @@ public class DatabasePath {
         this.tableName = tableName;
         this.databasePath =  Paths.get(Constants.ROOT_DIRECTORY, dbName);
         this.namespacesPath =  databasePath.resolve(namespacesName);
-        this.tablePath =  databasePath.resolve(tableName);
+        this.tablePath =  namespacesPath.resolve(tableName);
+        this.fsmPath = tablePath.resolve(tableName + ".fsm");
     }
+
+    public DatabasePath(String dbName, String namespaceName) {
+
+        validateName(dbName, "databaseName");
+        validateName(namespaceName, "namespaceName");
+        this.databaseName = dbName;
+        this.namespaceName = namespaceName;
+        this.tableName = null;
+        this.databasePath = Paths.get(Constants.ROOT_DIRECTORY, dbName);
+        this.namespacesPath = databasePath.resolve(namespaceName);
+        this.tablePath = null;
+        this.fsmPath = null;
+    }
+
     private static void validateName(String name, String field){
         if (name == null || name.isBlank()) throw new IllegalArgumentException(field + " no puede ser nulo o vacio.");
         /*
@@ -36,22 +52,21 @@ public class DatabasePath {
         if (name.equals(".") || name.equals("..") || name.contains("/") || name.contains("\\"))
             throw new IllegalArgumentException(field + "contiene caractes invalidos");
     }
+
     public Path getSchemaPath() {
-        return tablePath.resolve("schema_" + tablePath);
+        return tablePath.resolve(tableName + ".schema");
     }
+
     public Path getDataPath() {
-        return tablePath.resolve("data");
+        return tablePath.resolve(tableName + ".data");
     }
+
     public Path getIndexPath() {
-        return tablePath.resolve("index");
+        return tablePath.resolve(tableName + ".index");
     }
 
-    public Path getDbName() {
-        return databasePath;
-    }
-
-    public Path getNamespacesName() {
-        return namespacesPath;
+    public Path getFsmPath() {
+        return fsmPath;
     }
 
     public Path getDatabasePath() {
@@ -77,4 +92,6 @@ public class DatabasePath {
     public String getTableName() {
         return tableName;
     }
+
+
 }
