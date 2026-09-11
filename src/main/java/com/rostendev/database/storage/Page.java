@@ -211,6 +211,63 @@ public class Page {
         return Math.max(0,getFreeSpace() - Constants.SLOT_SIZE);
     }
 
+    public void update(short slotId, byte[] newData) {
+
+        if (newData == null || newData.length == 0)
+            throw new IllegalArgumentException("data no puede ser null o vacio");
+
+        Slot slot = slots.get(slotId);
+
+        if (slot == null || slot.isFree())
+            throw new IllegalArgumentException(
+                    "El slot no existe o esta libre: " + slotId
+            );
+
+        if (newData.length > slot.getLength())
+            throw new IllegalArgumentException(
+                    "El nuevo registro es mas grande que el espacio actual"
+            );
+
+        int oldOffset = slot.getOffset();
+        int oldLength = slot.getLength();
+        int newLength = newData.length;
+
+        /* El nuevo registro tiene el mismo tamaño */
+        if (newLength == oldLength) {
+            System.arraycopy(newData,0,data,oldOffset,newLength);
+            return;
+        }
+
+        /* Si crece, este método no se encarga */
+        if (newLength > oldLength)
+            throw new IllegalArgumentException("El nuevo registro es mas grande que el actual");
+
+        /* El registro se achicó.
+         * Los registros que están físicamente por debajo
+         * del registro actualizado deben desplazarse.
+         */
+        int difference = oldLength - newLength;
+        int blockStart = freeEnd;
+        int blockLength = oldOffset - blockStart;
+
+        if (blockLength > 0) {
+            System.arraycopy(data,blockStart,data,blockStart + difference,blockLength);
+
+            /* Actualizamos los offsets de los registros que fueron desplazados.*/
+            for (Slot other : slots) {
+                if (other == slot || other.isFree()) continue;
+                if (other.getOffset() < oldOffset) other.setOffset(other.getOffset() + difference);
+            }
+        }
+
+        /* El registro actualizado cambia de offset porque el bloque inferior fue desplazado.*/
+        int newOffset = oldOffset + difference;
+        System.arraycopy(newData,0,data,newOffset,newLength);
+        slot.setOffset(newOffset);
+        slot.setLength(newLength);
+        /* Recuperamos el espacio liberado.*/
+        freeEnd += difference;
+    }
 
     @Override
     public String toString() {

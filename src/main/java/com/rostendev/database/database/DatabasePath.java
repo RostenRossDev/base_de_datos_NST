@@ -93,5 +93,7 @@ public class DatabasePath {
         return tableName;
     }
 
-
+    public Path getUniqueIndexPath(String columnName) {
+        return tablePath.resolve(tableName + "." + columnName + ".index");
+    }
 }

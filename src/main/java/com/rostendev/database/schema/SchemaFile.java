@@ -20,4 +20,8 @@ public class SchemaFile {
 
         serializer.write(schema, path);
     }
+
+    public Schema read() throws IOException {
+        return serializer.read(path);
+    }
 }

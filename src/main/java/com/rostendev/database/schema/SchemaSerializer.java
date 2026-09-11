@@ -1,9 +1,6 @@
 package com.rostendev.database.schema;
 
-import java.io.BufferedOutputStream;
-import java.io.DataOutputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 
 public class SchemaSerializer {
 
@@ -25,6 +22,33 @@ public class SchemaSerializer {
                 out.writeBoolean(column.isForeignKey());
                 out.writeBoolean(column.isUnique());
             }
+        }
+    }
+
+    public Schema read(String path) throws IOException {
+        try(DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(path)))) {
+
+            String tableName = in.readUTF();
+            Schema schema = new Schema(tableName);
+            int columnCount = in.readInt();
+            for (int i = 0; i < columnCount; i++) {
+                String name = in.readUTF();
+                DataType type = DataType.valueOf(in.readUTF());
+                Integer length = null;
+                boolean hasLength = in.readBoolean();
+                if (hasLength) {
+                    length = in.readInt();
+                }
+
+                boolean nullable = in.readBoolean();
+                boolean primaryKey = in.readBoolean();
+                boolean foreingKey = in.readBoolean();
+                boolean unique = in.readBoolean();
+
+                ColumnDefinition column = new ColumnDefinition(name, type, length, nullable, primaryKey, foreingKey, unique);
+                schema.addColumn(column);
+            }
+            return  schema;
         }
     }
 }

@@ -8,11 +8,17 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 public class DataBase implements AutoCloseable{
 
     private final Path databasePath;
     private final String databaseName;
+    private final Map<String, Namespace> namespaces = new HashMap<>();
 
     private DataBase (String databaseName) {
         validateName(databaseName, "databaseName");
@@ -22,14 +28,15 @@ public class DataBase implements AutoCloseable{
 
     public Namespace createNamespace(String namespaceName) throws IOException {
         DatabasePath databasePath = new DatabasePath(databaseName, namespaceName);
-
         NamespacePath namespacePath = new NamespacePath(databasePath, namespaceName);
         if (Files.exists(namespacePath.getNamespacePath()))
-            throw new IllegalArgumentException("El namespace ya existe: "+ namespacePath.getNamespacePath());
-
+            throw new IllegalArgumentException("El namespace ya existe: " +namespacePath.getNamespacePath());
         Files.createDirectory(namespacePath.getNamespacePath());
-        return new Namespace(databasePath, namespaceName);
+        Namespace namespace =new Namespace(databasePath, namespaceName);
+        namespaces.put(namespaceName, namespace);
+        return namespace;
     }
+
 
     public static DataBase create(String databaseName) throws IOException {
         DataBase dataBase = new DataBase(databaseName);
@@ -47,8 +54,20 @@ public class DataBase implements AutoCloseable{
         if (!Files.isDirectory(dataBase.databasePath))
             throw new IOException("La ruta de la base de datos no es un directorio: " + dataBase.databasePath);
 
+        try (var paths = Files.list(dataBase.databasePath)) {
+            List<Path> pathsDirectory = paths.filter(Files::isDirectory).collect(Collectors.toList());
+            for (Path path : pathsDirectory) {
+                String namespaceName = path.getFileName().toString();
+                DatabasePath namespaceDatabasePath = new DatabasePath(databaseName,namespaceName);
+                Namespace namespace = new Namespace(namespaceDatabasePath,namespaceName);
+                namespace.openTables();
+                dataBase.namespaces.put(namespaceName,namespace);
+            }
+        }
+
         return dataBase;
     }
+
 
     private static void validateName(String name, String field) {
         if (name == null || name.isBlank())
@@ -57,6 +76,10 @@ public class DataBase implements AutoCloseable{
         if (name.equals(".") || name.equals("..") || name.contains("/") || name.contains("\\"))
             throw new IllegalArgumentException(field + " contiene caracteres invalidos.");
 
+    }
+
+    public Namespace getNamespace(String namespaceName) {
+        return namespaces.get(namespaceName);
     }
 
     public Path getDatabasePath() {

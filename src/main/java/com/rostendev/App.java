@@ -1,6 +1,8 @@
 package com.rostendev;
 
 import com.rostendev.database.database.DataBase;
+import com.rostendev.database.index.IndexEntry;
+import com.rostendev.database.schema.SchemaFile;
 import com.rostendev.database.storage.freeSpaceManager.FreeSpaceEntry;
 import com.rostendev.database.storage.freeSpaceManager.FreeSpaceMap;
 import com.rostendev.database.schema.DataType;
@@ -22,27 +24,16 @@ import java.util.List;
  *
  */
 public class App {
-    public static void main(String[] args) throws Exception {
 
-        System.out.println("=== CREANDO DATABASE ===");
+    public static void main(String[] args) throws Exception {
 
         DataBase db = DataBase.create("universidad");
 
-        System.out.println("Database creada:");
-        System.out.println(db.getDatabasePath());
+        Namespace namespace =
+                db.createNamespace("public");
 
-
-        System.out.println("\n=== CREANDO NAMESPACE ===");
-
-        Namespace namespace = db.createNamespace("public");
-
-        System.out.println("Namespace creado:");
-        System.out.println(namespace.getNamespacePath());
-
-
-        System.out.println("\n=== CREANDO SCHEMA ===");
-
-        Schema schema = new Schema("persona");
+        Schema schema =
+                new Schema("persona");
 
         schema.addColumn(
                 new ColumnDefinition(
@@ -70,146 +61,171 @@ public class App {
 
         schema.addColumn(
                 new ColumnDefinition(
-                        "edad",
-                        DataType.INT,
-                        null,
+                        "email",
+                        DataType.STRING,
+                        150,
                         true,
                         false,
                         false,
-                        false
+                        true
                 )
         );
 
-        System.out.println("Schema creado:");
-        System.out.println("Tabla: " + schema.getTableName());
+        schema.addColumn(
+                new ColumnDefinition(
+                        "dni",
+                        DataType.STRING,
+                        20,
+                        false,
+                        false,
+                        false,
+                        true
+                )
+        );
 
-        for (ColumnDefinition column : schema.getColumns()) {
+        Table table =
+                namespace.createTable(schema);
+
+        // =====================================================
+        // INSERT 1
+        // =====================================================
+
+        Record record1 =
+                new Record(schema);
+
+        record1.set(0, 1);
+        record1.set(1, "Nestor");
+        record1.set(2, "nestor@gmail.com");
+        record1.set(3, "12345678");
+
+        table.insert(record1);
+
+        System.out.println("INSERT 1 OK");
+
+
+        // =====================================================
+        // INSERT 2
+        // Mismo email -> DEBE FALLAR
+        // =====================================================
+
+        Record record2 =
+                new Record(schema);
+
+        record2.set(0, 2);
+        record2.set(1, "Juan");
+        record2.set(2, "nestor@gmail.com");
+        record2.set(3, "87654321");
+
+        try {
+
+            table.insert(record2);
+
             System.out.println(
-                    " - "
-                            + column.getName()
-                            + " | "
-                            + column.getType()
-                            + " | length="
-                            + column.getLength()
-                            + " | nullable="
-                            + column.isNullable()
-                            + " | primaryKey="
-                            + column.isPrimaryKey()
-                            + " | foreignKey="
-                            + column.isForeignKey()
-                            + " | unique="
-                            + column.isUnique()
+                    "ERROR: se permitió email duplicado"
+            );
+
+        } catch (IllegalArgumentException e) {
+
+            System.out.println(
+                    "OK: email duplicado rechazado"
+            );
+
+            System.out.println(
+                    e.getMessage()
             );
         }
 
 
-        System.out.println("\n=== CREANDO TABLE ===");
+        // =====================================================
+        // INSERT 3
+        // Mismo DNI -> DEBE FALLAR
+        // =====================================================
 
-        Table table = namespace.createTable(schema);
+        Record record3 =
+                new Record(schema);
 
-        System.out.println("Table creada:");
-        System.out.println(table.getName());
+        record3.set(0, 3);
+        record3.set(1, "Pedro");
+        record3.set(2, "pedro@gmail.com");
+        record3.set(3, "12345678");
 
+        try {
 
-        System.out.println("\n=== VERIFICANDO ESTRUCTURA FISICA ===");
+            table.insert(record3);
 
-        Path tablePath = namespace
-                .getNamespacePath()
-                .resolve(schema.getTableName());
+            System.out.println(
+                    "ERROR: se permitió DNI duplicado"
+            );
 
-        Path dataPath =
-                tablePath.resolve(schema.getTableName() + ".data");
+        } catch (IllegalArgumentException e) {
 
-        Path schemaPath =
-                tablePath.resolve(schema.getTableName() + ".schema");
+            System.out.println(
+                    "OK: DNI duplicado rechazado"
+            );
 
-        Path indexPath =
-                tablePath.resolve(schema.getTableName() + ".index");
-
-        Path fsmPath =
-                tablePath.resolve(schema.getTableName() + ".fsm");
-
-
-        System.out.println(
-                "Database : "
-                        + db.getDatabasePath()
-                        + " -> "
-                        + Files.exists(db.getDatabasePath())
-        );
-
-        System.out.println(
-                "Namespace: "
-                        + namespace.getNamespacePath()
-                        + " -> "
-                        + Files.exists(namespace.getNamespacePath())
-        );
-
-        System.out.println(
-                "Table    : "
-                        + tablePath
-                        + " -> "
-                        + Files.exists(tablePath)
-        );
-
-        System.out.println(
-                "Data     : "
-                        + dataPath
-                        + " -> "
-                        + Files.exists(dataPath)
-        );
-
-        System.out.println(
-                "Schema   : "
-                        + schemaPath
-                        + " -> "
-                        + Files.exists(schemaPath)
-        );
-
-        System.out.println(
-                "Index    : "
-                        + indexPath
-                        + " -> "
-                        + Files.exists(indexPath)
-        );
-
-        System.out.println(
-                "FSM      : "
-                        + fsmPath
-                        + " -> "
-                        + Files.exists(fsmPath)
-        );
-
-
-        System.out.println("\n=== ESTRUCTURA COMPLETA ===");
-
-        Files.walk(db.getDatabasePath())
-                .forEach(System.out::println);
-
-
-        table.close();
-        namespace.close();
-        db.close();
-
-        System.out.println("\n=== TEST FINALIZADO ===");
-    }
-
-    private static void deleteDirectory(File directory) {
-
-        File[] files = directory.listFiles();
-
-        if (files == null) {
-            return;
+            System.out.println(
+                    e.getMessage()
+            );
         }
 
-        for (File file : files) {
 
-            if (file.isDirectory()) {
-                deleteDirectory(file);
-            } else {
-                file.delete();
-            }
-        }
+        // =====================================================
+        // INSERT 4
+        // Email NULL -> DEBE ENTRAR
+        // =====================================================
 
-        directory.delete();
+        Record record4 =
+                new Record(schema);
+
+        record4.set(0, 4);
+        record4.set(1, "Maria");
+        record4.set(2, null);
+        record4.set(3, "11111111");
+
+        table.insert(record4);
+
+        System.out.println(
+                "INSERT 4 OK - email NULL"
+        );
+
+
+        // =====================================================
+        // INSERT 5
+        // Otro email NULL -> TAMBIÉN DEBE ENTRAR
+        // =====================================================
+
+        Record record5 =
+                new Record(schema);
+
+        record5.set(0, 5);
+        record5.set(1, "Ana");
+        record5.set(2, null);
+        record5.set(3, "22222222");
+
+        table.insert(record5);
+
+        System.out.println(
+                "INSERT 5 OK - segundo email NULL"
+        );
+
+
+        // =====================================================
+        // INSERT 6
+        // Todo diferente -> DEBE ENTRAR
+        // =====================================================
+
+        Record record6 =
+                new Record(schema);
+
+        record6.set(0, 6);
+        record6.set(1, "Carlos");
+        record6.set(2, "carlos@gmail.com");
+        record6.set(3, "33333333");
+
+        table.insert(record6);
+
+        System.out.println(
+                "INSERT 6 OK"
+        );
     }
 }
