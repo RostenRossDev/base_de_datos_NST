@@ -22,3 +22,20 @@ FSM.findPage()
                 │
                 ▼
              FSM
+
+
+             DataFile
+                │
+     ┌──────────┴──────────┐
+     │                     │
+  data.nst              data.nst.fsm
+     │                     │
+     ▼                     ▼
+  Pages              page → freeSpace
+     │                     │
+     │              TreeMap en memoria
+     │                     │
+     └──────────┬──────────┘
+                │
+                ▼
+           INSERT rápido

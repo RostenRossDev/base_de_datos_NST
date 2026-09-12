@@ -1,0 +1,33 @@
+INSERT
+  │
+  ├── serializar Record
+  │
+  ├── FSM.findPage(tamaño)
+  │       │
+  │       └── encuentra pageId
+  │
+  ├── leer Page
+  │
+  ├── Page.insert()
+  │
+  ├── escribir Page → data.nst
+  │
+  └── actualizar FSM → data.fsm
+
+Y si ninguna página sirve:
+
+  FSM.findPage()
+        │
+        └── -1
+            │
+            ▼
+       new Page(pageCount)
+            │
+            ▼
+        Page.insert()
+            │
+            ▼
+         data.nst
+            │
+            ▼
+         FSM.addPage()

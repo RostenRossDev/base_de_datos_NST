@@ -2,7 +2,6 @@ package com.rostendev.database.storage;
 
 import com.rostendev.database.constants.Constants;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -29,9 +28,13 @@ public class Page {
         return freeEnd - freeStart;
     }
 
-    /*Inserta un nuevo registro en la pagina
-    * @return RecordPoiner indicando donde quedo almacenado.
-    * */
+    /**
+     * Inserta un registro en la página.
+     * Si existe un slot libre, se reutiliza su slotId.
+     * Si no existe, se crea un nuevo slot.
+     * @return RecordPointer indicando la ubicación física
+     *         del registro.
+     */
     public RecordPointer insert(byte[] recordData) {
         if (recordData == null) throw new IllegalArgumentException("data no puede ser null.");
         if (recordData.length == 0)  throw new IllegalArgumentException("No se puede insertar un registro vacio.");
@@ -43,6 +46,7 @@ public class Page {
             Slot slot = slots.get(slotId);
             if (slot.isFree()) {
                 if (recordData.length > getFreeSpace()) throw new IllegalArgumentException("No hay espacio en la pagina");
+                /* Los registros crecen desde el final de la página hacia freeStart.*/
                 int recordOffset = freeEnd - recordData.length;
                 System.arraycopy(recordData, 0, data, recordOffset, recordData.length);
                 /*Reutilizamos el mismo slot. eL SLOTiD NO CAMBI*/
@@ -52,13 +56,10 @@ public class Page {
                 return  new RecordPointer(pageId, slotId);
             }
         }
-        /* * ==========================================
-        * * 2. NO HAY SLOT REUTILIZABLE
-        * * ========================================== */
 
-        /*
-         * Necesitamos espacio para:
-         *
+        /* * 2. NO HAY SLOT REUTILIZABLE
+        * * ========================================== */
+        /*Necesitamos espacio para:
          * 1. Los bytes del registro
          * 2. Una nueva entrada en el slot directory
          */
@@ -103,7 +104,13 @@ public class Page {
         return slots.get(slotId);
     }
 
-    /*Indica si existe espacio sufucuetne para un nuevo registro*/
+    /**
+     * Indica si existe espacio suficiente para insertar
+     * un registro.
+     * Si existe un slot libre solamente necesitamos
+     * espacio para los bytes del registro.
+     * Si no existe, también necesitamos crear un nuevo slot.
+     */
     public boolean canFit(int dataLength){
         if (dataLength <= 0) return false;
         boolean hasFreeSlot = slots.stream().anyMatch(Slot::isFree);
@@ -129,14 +136,18 @@ public class Page {
 
     public void setSlotInfo(int slotId, int offset, int length) {
         if (slotId < 0) throw new IllegalArgumentException("slotId no puede ser negativo");
-        if (slotId >= slots.size()) throw new IllegalArgumentException("slotId inválido: " + slotId);
+        if (slotId >= slots.size()) throw new IllegalArgumentException("slotId invalido: " + slotId);
+        if (offset < Constants.HEADER_SIZE || offset > Constants.PAGE_SIZE)
+            throw new IllegalArgumentException("offset invalido: " + offset);
+        if (length < 0 || offset + length > Constants.PAGE_SIZE)
+            throw new IllegalArgumentException("length invalido: " + length);
         Slot slot = slots.get(slotId);
         slot.setOffset(offset);
         slot.setLength(length);
     }
 
     public void setFreeStart(int freeStart) {
-        if (freeStart < Constants.HEADER_SIZE ||freeStart > Constants.PAGE_SIZE)
+        if (freeStart < Constants.HEADER_SIZE || freeStart > Constants.PAGE_SIZE)
             throw new IllegalArgumentException("freeStart inválido: " + freeStart);
         this.freeStart = freeStart;
     }
@@ -156,8 +167,9 @@ public class Page {
         slots.add(slot);
     }
 
-    /** Marca un registro como eliminado.
-     * Por ahora no compactamos la página.
+    /**Elimina un registro y compacta el área de registros.
+     * El slot se conserva para poder reutilizar su slotId
+     * en una futura inserción.
      */
     public void delete(short slotId) {
         Slot deletedSlot  = getSlot(slotId);
@@ -180,6 +192,8 @@ public class Page {
             /* Todos los registros que estaban por debajo del
              * eliminado cambiaron de offset.*/
             for (Slot slot : slots) {
+                if (slot.isFree()) continue;
+                if (slot == deletedSlot) continue;
                 if (!slot.isFree() && slot.getOffset() < deletedOffset) {
                     slot.setOffset(slot.getOffset() + deletedLength);
                 }
@@ -205,29 +219,38 @@ public class Page {
         return data;
     }
 
+    /**
+     * Cantidad máxima de bytes de registro que puede
+     * recibir actualmente esta página.
+     *
+     * Si existe un slot libre, no necesitamos crear
+     * una nueva entrada en el slot directory.
+     */
     public int getInsertableSpace() {
         boolean hasFreeSlot = slots.stream().anyMatch(Slot::isFree);
         if (hasFreeSlot) return getFreeSpace();
         return Math.max(0,getFreeSpace() - Constants.SLOT_SIZE);
     }
 
+    /**
+     * Actualiza un registro existente.
+     *
+     * Este método solamente permite registros del mismo
+     * tamaño o más pequeños.
+     *
+     * Si el registro necesita crecer, DataFile será
+     * responsable de moverlo a otra ubicación física.
+     */
     public void update(short slotId, byte[] newData) {
-
         if (newData == null || newData.length == 0)
             throw new IllegalArgumentException("data no puede ser null o vacio");
 
         Slot slot = slots.get(slotId);
 
         if (slot == null || slot.isFree())
-            throw new IllegalArgumentException(
-                    "El slot no existe o esta libre: " + slotId
-            );
-
+            throw new IllegalArgumentException("El slot no existe o esta libre: " + slotId);
         if (newData.length > slot.getLength())
-            throw new IllegalArgumentException(
-                    "El nuevo registro es mas grande que el espacio actual"
-            );
-
+            throw new IllegalArgumentException("El nuevo registro es mas grande que el espacio actual");
         int oldOffset = slot.getOffset();
         int oldLength = slot.getLength();
         int newLength = newData.length;
@@ -238,14 +261,12 @@ public class Page {
             return;
         }
 
-        /* Si crece, este método no se encarga */
-        if (newLength > oldLength)
-            throw new IllegalArgumentException("El nuevo registro es mas grande que el actual");
+        /*==========================================
+         * REGISTRO MÁS PEQUEÑO
+         * ==========================================
+         * Liberamos la diferencia compactando
+         * el área de registros. */
 
-        /* El registro se achicó.
-         * Los registros que están físicamente por debajo
-         * del registro actualizado deben desplazarse.
-         */
         int difference = oldLength - newLength;
         int blockStart = freeEnd;
         int blockLength = oldOffset - blockStart;
@@ -260,7 +281,11 @@ public class Page {
             }
         }
 
-        /* El registro actualizado cambia de offset porque el bloque inferior fue desplazado.*/
+        /*
+         * El registro actualizado también cambia
+         * de posición porque el bloque inferior
+         * fue desplazado.
+         */
         int newOffset = oldOffset + difference;
         System.arraycopy(newData,0,data,newOffset,newLength);
         slot.setOffset(newOffset);

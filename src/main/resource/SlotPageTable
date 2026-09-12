@@ -1,0 +1,75 @@
+                Table
+                   │
+                   │ Record
+                   ▼
+                DataFile
+                   │
+       ┌───────────┼────────────┐
+       │           │            │
+ RecordSerializer  │      FreeSpaceMap
+                   │
+                   ▼
+                 Page
+                   │
+             ┌─────┴─────┐
+             │           │
+           Slot        Slot
+             │           │
+             └─────┬─────┘
+                   │
+                byte[]
+                   │
+                   ▼
+                data.nst
+
+Qué hace cada una con TU código
+Slot
+
+Es solamente metadata:
+
+offset
+length
+
+No sabe insertar, borrar ni leer.
+
+Page
+
+Es la unidad física de 4096 bytes.
+
+Es responsable de:
+
+page.insert(byte[])
+page.read(slotId)
+page.update(slotId, byte[])
+page.delete(slotId)
+
+Y mantiene:
+
+freeStart
+freeEnd
+slots
+data
+
+Eso está correcto.
+
+Por ejemplo:
+
+Page 0
+
+┌──────────────────────────┐
+│ header                   │
+├──────────────────────────┤
+│ Slot 0                   │
+│ Slot 1                   │
+│ Slot 2                   │
+├──────────────────────────┤
+│                          │
+│      espacio libre       │
+│                          │
+├──────────────────────────┤
+│ registro 2               │
+│ registro 1               │
+│ registro 0               │
+└──────────────────────────┘
+
+Page sabe todo lo necesario para manipular esa estructura.

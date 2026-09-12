@@ -127,7 +127,7 @@ public class Table {
 
         // GUARDAR EN DATA
         // =====================================================
-        dataFile.write(page);
+//        dataFile.write(page);
         System.out.println("FSM -> page=" + page.getPageId()+ " freeSpace=" + page.getFreeSpace()
                         + " insertable=" + page.getInsertableSpace());
         freeSpaceManager.updatePage(page);
@@ -239,7 +239,7 @@ public class Table {
         // ELIMINAR REGISTRO FÍSICAMENTE
         // =====================================================
         page.delete(pointer.getSlotId());
-        dataFile.write(page);
+//        dataFile.write(page);
         freeSpaceManager.updatePage(page);
     }
 
@@ -253,7 +253,7 @@ public class Table {
         Page page = dataFile.read(pointer.getPageId());
         if (page == null) throw new IOException("No existe la pagina " + pointer.getPageId());
         page.delete(pointer.getSlotId());
-        dataFile.write(page);
+//        dataFile.write(page);
     }
 
     public void update(Record record) throws IOException {
@@ -330,18 +330,18 @@ public class Table {
         if (sameSize) {
             /* El registro entra en el slot actual. */
             oldPage.update(oldPointer.getSlotId(),newRecordData);
-            dataFile.write(oldPage);
+//            dataFile.write(oldPage);
             freeSpaceManager.updatePage(oldPage);
             newPointer = oldPointer;
         } else {
             /* El registro ya no entra en el slot actual.
              * Eliminamos físicamente el registro viejo y lo insertamos nuevamente. */
             oldPage.delete(oldPointer.getSlotId());
-            dataFile.write(oldPage);
+//            dataFile.write(oldPage);
             freeSpaceManager.updatePage(oldPage);
             Page page = freeSpaceManager.findPage(newRecordData.length);
             newPointer = page.insert(newRecordData);
-            dataFile.write(page);
+//            dataFile.write(page);
             freeSpaceManager.updatePage(page);
         }
 

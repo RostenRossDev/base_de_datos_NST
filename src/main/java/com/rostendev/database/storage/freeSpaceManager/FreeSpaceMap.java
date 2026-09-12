@@ -128,6 +128,7 @@ public class FreeSpaceMap implements AutoCloseable {
         file.writeInt(freeSpace);
     }
 
+
     @Override
     public void close() throws IOException  {
         file.close();
