@@ -10,9 +10,12 @@ public class ColumnDefinition {
     private final boolean foreignKey;
     private final boolean unique;
 
-    public ColumnDefinition(String name, DataType type, Integer length,
-            boolean nullable, boolean primaryKey,
-            boolean foreignKey, boolean unique) {
+    private final String referencedTable;
+    private final String referencedColumn;
+
+    public ColumnDefinition(String name, DataType type, Integer length, boolean nullable,
+            boolean primaryKey, boolean foreignKey, boolean unique, String referencedTable,
+            String referencedColumn) {
 
         this.name = name;
         this.type = type;
@@ -21,6 +24,8 @@ public class ColumnDefinition {
         this.primaryKey = primaryKey;
         this.foreignKey = foreignKey;
         this.unique = unique;
+        this.referencedTable = referencedTable;
+        this.referencedColumn = referencedColumn;
     }
 
     public String getName() {
@@ -29,6 +34,14 @@ public class ColumnDefinition {
 
     public DataType getType() {
         return type;
+    }
+
+    public String getReferencedTable() {
+        return referencedTable;
+    }
+
+    public String getReferencedColumn() {
+        return referencedColumn;
     }
 
     public Integer getLength() {

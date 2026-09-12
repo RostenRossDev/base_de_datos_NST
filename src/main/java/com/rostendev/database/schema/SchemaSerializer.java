@@ -21,6 +21,13 @@ public class SchemaSerializer {
                 out.writeBoolean(column.isPrimaryKey());
                 out.writeBoolean(column.isForeignKey());
                 out.writeBoolean(column.isUnique());
+
+                out.writeBoolean(column.getReferencedTable() != null);
+
+                if (column.getReferencedTable() != null) {
+                    out.writeUTF(column.getReferencedTable());
+                    out.writeUTF(column.getReferencedColumn());
+                }
             }
         }
     }
@@ -44,8 +51,16 @@ public class SchemaSerializer {
                 boolean primaryKey = in.readBoolean();
                 boolean foreingKey = in.readBoolean();
                 boolean unique = in.readBoolean();
+                String referencedTable = null;
+                String referencedColumn = null;
+                boolean hasReference = in.readBoolean();
+                if (hasReference){
+                    referencedTable = in.readUTF();
+                    referencedColumn = in.readUTF();
+                }
 
-                ColumnDefinition column = new ColumnDefinition(name, type, length, nullable, primaryKey, foreingKey, unique);
+                ColumnDefinition column = new ColumnDefinition(name, type, length, nullable,
+                        primaryKey, foreingKey, unique, referencedTable, referencedColumn);
                 schema.addColumn(column);
             }
             return  schema;

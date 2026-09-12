@@ -31,7 +31,7 @@ public class Namespace implements AutoCloseable {
 
         if (Files.exists(tablePath.getTablePath())) throw new IllegalArgumentException("La tabla ya existe");
         Files.createDirectory(tablePath.getTablePath());
-        Table table = new Table(tablePath.getDatabaseName(), tablePath.getNamespaceName(), schema);
+        Table table = new Table(this, tablePath.getDatabaseName(), schema);
         tables.put(schema.getTableName(), table);
         return table;
     }
@@ -43,7 +43,7 @@ public class Namespace implements AutoCloseable {
         if (!Files.exists(tablePath.getTablePath())) throw new IllegalArgumentException("La tabla no existe: " + tablePath.getTableName());
         if (!Files.isDirectory(tablePath.getTablePath())) throw new IllegalArgumentException("La ruta de latabla no es un directorio: " + tablePath.getTableName());
 
-        return new Table(tablePath.getDatabaseName(), tablePath.getNamespaceName(), schema);
+        return new Table(this, tablePath.getDatabaseName(), schema);
     }
 
 
@@ -60,13 +60,20 @@ public class Namespace implements AutoCloseable {
 
                     SchemaFile schemaFile =new SchemaFile(tablePath.getSchemaPath().toString());
                     Schema schema = schemaFile.read();
-                    Table table =new Table(tablePath,schema);
+                    Table table =new Table(this, tablePath,schema);
                     tables.put(tableName, table);
                 } catch (IOException e) {
                     throw new RuntimeException("No se pudo abrir la tabla: " + path,e);
                 }
             });
         }
+    }
+
+    public boolean hasReferences(String referencedTable, String referencedColumn, Object value) throws IOException {
+        for (Table table : tables.values()) {
+            if (table.hasForeignKeyReference(referencedTable, referencedColumn,value)) return true;
+        }
+        return false;
     }
 
     public String getNamespaceName() {

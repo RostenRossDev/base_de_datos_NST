@@ -1,6 +1,7 @@
 package com.rostendev.database.table;
 
 import com.rostendev.database.database.DatabasePath;
+import com.rostendev.database.fkIndex.ForeignKeyManager;
 import com.rostendev.database.index.BPlusTree;
 import com.rostendev.database.index.IndexEntry;
 import com.rostendev.database.index.IndexManager;
@@ -10,15 +11,13 @@ import com.rostendev.database.schema.ColumnDefinition;
 import com.rostendev.database.schema.DataType;
 import com.rostendev.database.schema.Schema;
 import com.rostendev.database.schema.SchemaFile;
-import com.rostendev.database.storage.DataFile;
-import com.rostendev.database.storage.Slot;
+import com.rostendev.database.storage.*;
 import com.rostendev.database.storage.freeSpaceManager.FreeSpaceManager;
-import com.rostendev.database.storage.Page;
-import com.rostendev.database.storage.RecordPointer;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Objects;
 
 public class Table {
     private final String name;
@@ -29,17 +28,21 @@ public class Table {
     private final BPlusTree index;
     private final int primaryKeyColumn;
     private final IndexManager indexManager;
+    private final Namespace namespace;
+    private final ForeignKeyManager foreignKeyManager;
+
 //    private final Map<String, BPlusTree> uniqueIndexes;
 
-    public Table(String dbName,  String namespace, Schema schema) throws IOException {
+    public Table(Namespace namespace, String dbName, Schema schema) throws IOException {
         if (schema == null) throw new IllegalArgumentException("schema no puede ser null");
         if (schema.getTableName() == null || schema.getTableName().isBlank()) throw new IllegalArgumentException("El schema debe tener un nombre");
+        if (namespace == null) throw new IllegalArgumentException("namespace no puede ser null");
 
         this.name = schema.getTableName();
         this.schema = schema;
 
         /*Ruta Fisica*/
-        this.databasePath = new DatabasePath(dbName, namespace, name);
+        this.databasePath = new DatabasePath(dbName, namespace.getNamespaceName(), name);
 
         //Crear el archivo de schema y el data file
         SchemaFile schemaFile =new SchemaFile(databasePath.getSchemaPath().toString());
@@ -56,11 +59,14 @@ public class Table {
         ColumnDefinition primaryKey = schema.getColumns().get(primaryKeyColumn);
         this.index = new BPlusTree(databasePath.getIndexPath(),  primaryKey.getType());
         this.indexManager =new IndexManager(databasePath,schema);
+        this.namespace = namespace;
+        this.foreignKeyManager = new ForeignKeyManager(this);
     }
 
-    public Table(DatabasePath databasePath, Schema schema) throws IOException {
+    public Table(Namespace namespace, DatabasePath databasePath, Schema schema) throws IOException {
         if (databasePath == null) throw new IllegalArgumentException("databasePath no puede ser null");
         if (schema == null) throw new IllegalArgumentException("schema no puede ser null");
+        if (namespace == null) throw new IllegalArgumentException("namespace no puede ser null");
         this.name = schema.getTableName();
         this.schema = schema;
         this.databasePath = databasePath;
@@ -70,6 +76,8 @@ public class Table {
         ColumnDefinition primaryKey = schema.getColumns().get(primaryKeyColumn);
         this.index = new BPlusTree(databasePath.getIndexPath(),primaryKey.getType());
         this.indexManager =new IndexManager(databasePath,schema);
+        this.namespace = namespace;
+        this.foreignKeyManager = new ForeignKeyManager(this);
     }
 
     /*Insert*/
@@ -78,8 +86,13 @@ public class Table {
         if (record.getSchema() != schema) throw new IllegalArgumentException("El record pertenece a otro schema");
 
         validateRecord(record);
+        // VALIDAR FOREIGN KEY
+        // =====================================================
+        foreignKeyManager.validate(record);
+
         Object primaryKey = record.get(primaryKeyColumn);
         if (primaryKey == null) throw new IllegalArgumentException("La clave primaria no puede ser null");
+
 
         // VALIDAR PRIMARY KEY
         // =====================================================
@@ -133,6 +146,14 @@ public class Table {
             indexManager.insert(i,value,pointer);
         }
 
+        // INSERTAR FOREIGN KEY RELATIONS
+        // =====================================================
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            if (!foreignKeyManager.hasForeignKey(i)) continue;
+            Object foreignKey = record.get(i);
+            if (foreignKey == null) continue;
+            foreignKeyManager.insert(i,foreignKey,primaryKey,pointer);
+        }
         return pointer;
     }
 
@@ -169,21 +190,56 @@ public class Table {
     public void delete(RecordPointer pointer) throws IOException {
         if (pointer == null) throw new IllegalArgumentException("pointer no puede ser null");
         Page page = dataFile.read(pointer.getPageId());
-        if (page == null) throw new IOException("No existe la pagina " + pointer.getPageId());
-        // Recuperamos el registro usando directamente el pointer
-        byte[] recordData = page.read(pointer.getSlotId());
-        RecordSerializer serializer = new RecordSerializer();
-        Record record = serializer.deserialize(recordData, schema);
+        if (page == null) throw new IOException("No existe la pagina " +pointer.getPageId());
+        byte[] recordData =page.read(pointer.getSlotId());
+        RecordSerializer serializer =new RecordSerializer();
+        Record record =serializer.deserialize(recordData,schema);
 
-        // Necesitamos la PK para eliminarla del B+Tree
+        // =====================================================
+        // PRIMARY KEY
+        // =====================================================
         Object primaryKey = record.get(primaryKeyColumn);
-        // 1. Eliminar del índice
+
+        // VALIDAR FOREIGN KEYS QUE REFERENCIAN
+        // ESTE REGISTRO ==========================================
+        String primaryKeyName = schema.getColumns().get(primaryKeyColumn).getName();
+        if (namespace.hasReferences(schema.getTableName(), primaryKeyName, primaryKey))
+            throw new IllegalArgumentException("No se puede eliminar el registro con clave " +
+                    "primaria " + primaryKey + " porque existen registros que lo referencian.");
+
+        // =====================================================
+        // ELIMINAR PRIMARY KEY DEL ÍNDICE
+        // =====================================================
         index.delete(primaryKey);
-        // 2. Liberar el slot físicamente
+
+        // =====================================================
+        // ELIMINAR UNIQUE INDEXES
+        // =====================================================
+
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            ColumnDefinition column = schema.getColumns().get(i);
+            if (!column.isUnique() || column.isPrimaryKey()) continue;
+            Object value = record.get(i);
+
+            // NULL nunca fue agregado al índice
+            if (value == null) continue;
+            indexManager.delete(i,value);
+        }
+        // ELIMINAR RELACIONES FOREIGN KEY
+        // DE ESTE REGISTRO SI ESTA TABLA ES HIJA ==========================================
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            ColumnDefinition column = schema.getColumns().get(i);
+            if (!column.isForeignKey()) continue;
+            Object foreignKey = record.get(i);
+            if (foreignKey == null) continue;
+            foreignKeyManager.delete(i, foreignKey, primaryKey);
+        }
+
+        // =====================================================
+        // ELIMINAR REGISTRO FÍSICAMENTE
+        // =====================================================
         page.delete(pointer.getSlotId());
-        // 3. Persistir la página
         dataFile.write(page);
-        // 4. Informar al FSM
         freeSpaceManager.updatePage(page);
     }
 
@@ -201,54 +257,125 @@ public class Table {
     }
 
     public void update(Record record) throws IOException {
-        if (record == null) throw new IllegalArgumentException("record no puede ser null");
-
-        if (record.getSchema() != schema)
-            throw new IllegalArgumentException("El record pertenece a otro schema");
-        validateRecord(record);
-        Object primaryKey = record.get(primaryKeyColumn);
-        if (primaryKey == null)
-            throw new IllegalArgumentException("La clave primaria no puede ser null");
-
-        /* Buscamos el registro actual mediante el índice */
-        IndexEntry entry = index.search(primaryKey);
-        if (entry == null)
-            throw new IllegalArgumentException("No existe un registro con la clave primaria: " + primaryKey);
-
-        RecordPointer oldPointer =new RecordPointer(entry.getPageNumber(),(short) entry.getSlotNumber());
-        RecordPointer pointer =new RecordPointer(entry.getPageNumber(),(short) entry.getSlotNumber());
-        Page oldPage =dataFile.read(oldPointer.getPageId());
-        if (oldPage == null) throw new IOException("No existe la pagina: " +oldPointer.getPageId());
-
-        /* Serializamos el nuevo registro */
-        RecordSerializer serializer = new RecordSerializer();
-        byte[] recordData = serializer.serialize(record);
-
-        Slot oldSlot = oldPage.getSlot(oldPointer.getSlotId());
-
-       /* CASO 1:  El nuevo registro entra en el espacio actual.*/
-        if (recordData.length <= oldSlot.getLength()) {
-            oldPage.update(oldPointer.getSlotId(),recordData);
-            dataFile.write(oldPage);
-            freeSpaceManager.updatePage(oldPage);
-            return;
+        if (record == null) {
+            throw new IllegalArgumentException("record no puede ser null");
         }
 
-        /* CASO 2: El nuevo registro es más grande.
-         * Primero eliminamos físicamente el registro viejo.*/
-        index.delete(primaryKey);
-        oldPage.delete(oldPointer.getSlotId());
-        dataFile.write(oldPage);
-        freeSpaceManager.updatePage(oldPage);
+        if (record.getSchema() != schema) {
+            throw new IllegalArgumentException(
+                    "El schema del record no coincide con el schema de la tabla"
+            );
+        }
 
-        /*Insertamos el nuevo registro. findPage() puede reutilizar la misma página o buscar otra.*/
-        Page newPage = freeSpaceManager.findPage(recordData.length);
-        RecordPointer newPointer =newPage.insert(recordData);
-        dataFile.write(newPage);
-        freeSpaceManager.updatePage(newPage);
+        validateRecord(record);
+        Object primaryKey = record.get(primaryKeyColumn);
+        IndexEntry entry = index.search(primaryKey);
+        if (entry == null) {
+            throw new IllegalArgumentException(
+                    "No existe un registro con clave primaria: " + primaryKey
+            );
+        }
 
-        /*El índice ahora apunta a la nueva ubicación.*/
-        index.insert(primaryKey,newPointer.getPageId(),newPointer.getSlotId());
+        RecordPointer oldPointer = new RecordPointer(entry.getPageNumber(),(short) entry.getSlotNumber());
+        Page oldPage = dataFile.read(oldPointer.getPageId());
+        if (oldPage == null)
+            throw new IOException("No existe la pagina " + oldPointer.getPageId());
+
+        byte[] oldRecordData = oldPage.read(oldPointer.getSlotId());
+        RecordSerializer serializer = new RecordSerializer();
+        Record oldRecord = serializer.deserialize(oldRecordData,schema);
+
+        /* La PK es inmutable.
+         * Como el registro fue localizado utilizando la nueva PK,
+         * si llegamos hasta acá significa que estamos actualizando
+         * el mismo registro. */
+
+        /* Validamos UNIQUE antes de modificar nada. */
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            ColumnDefinition column = schema.getColumns().get(i);
+            if (!column.isUnique() || column.isPrimaryKey()) continue;
+            Object oldValue = oldRecord.get(i);
+            Object newValue = record.get(i);
+            if (Objects.equals(oldValue, newValue)) continue;
+            if (newValue == null) continue;
+            IndexEntry uniqueEntry = indexManager.search(i, newValue);
+
+            if (uniqueEntry != null) {
+                throw new IllegalArgumentException(
+                        "El valor '" + newValue
+                                + "' ya existe en la columna UNIQUE '"+ column.getName() + "'"
+                );
+            }
+        }
+
+        /*Validamos FOREIGN KEY antes de modificar nada.
+         * Si el nuevo FK apunta a un padre inexistente,
+         * el update completo se rechaza. */
+        foreignKeyManager.validate(record);
+        byte[] newRecordData = serializer.serialize(record);
+        boolean sameSize = newRecordData.length <= oldRecordData.length;
+
+        /* Eliminamos temporalmente las relaciones FK antiguas.
+         * Esto se hace siempre porque incluso si el FK no cambia,
+         * el RecordPointer puede cambiar si el registro debe moverse. */
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            ColumnDefinition column = schema.getColumns().get(i);
+            if (!column.isForeignKey()) continue;
+            Object oldForeignKey = oldRecord.get(i);
+            if (oldForeignKey == null) continue;
+            foreignKeyManager.delete(i,oldForeignKey,primaryKey);
+        }
+
+        RecordPointer newPointer;
+        if (sameSize) {
+            /* El registro entra en el slot actual. */
+            oldPage.update(oldPointer.getSlotId(),newRecordData);
+            dataFile.write(oldPage);
+            freeSpaceManager.updatePage(oldPage);
+            newPointer = oldPointer;
+        } else {
+            /* El registro ya no entra en el slot actual.
+             * Eliminamos físicamente el registro viejo y lo insertamos nuevamente. */
+            oldPage.delete(oldPointer.getSlotId());
+            dataFile.write(oldPage);
+            freeSpaceManager.updatePage(oldPage);
+            Page page = freeSpaceManager.findPage(newRecordData.length);
+            newPointer = page.insert(newRecordData);
+            dataFile.write(page);
+            freeSpaceManager.updatePage(page);
+        }
+
+        /*
+         * Actualizamos índices UNIQUE.
+         */
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            ColumnDefinition column = schema.getColumns().get(i);
+            if (!column.isUnique() || column.isPrimaryKey()) continue;
+            Object oldValue = oldRecord.get(i);
+            Object newValue = record.get(i);
+            if (Objects.equals(oldValue, newValue)) continue;
+            if (oldValue != null) indexManager.delete(i, oldValue);
+            if (newValue != null) indexManager.insert(i,newValue,newPointer);
+        }
+
+        /*
+         * Si el registro cambió de posición, el índice PK debe
+         * apuntar al nuevo RecordPointer.
+         */
+        if (!oldPointer.equals(newPointer)) {
+            index.delete(primaryKey);
+            index.insert(primaryKey,newPointer.getPageId(),newPointer.getSlotId());
+        }
+
+        /*Creamos nuevamente las relaciones FOREIGN KEY,
+         * ahora apuntando al nuevo RecordPointer.*/
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            ColumnDefinition column = schema.getColumns().get(i);
+            if (!column.isForeignKey()) continue;
+            Object newForeignKey = record.get(i);
+            if (newForeignKey == null) continue;
+            foreignKeyManager.insert(i,newForeignKey,primaryKey,newPointer);
+        }
     }
 
     public int findPrimaryKeyColumn() {
@@ -270,6 +397,22 @@ public class Table {
             throw new IllegalArgumentException("El BPlusTree actual requiere una clave primaria INT." +
                     "Tipo recibido: " + primaryKey.getClass().getSimpleName());
         return (Integer) primaryKey;
+    }
+
+    public Table getReferencedTable(ColumnDefinition column) {
+        if (!column.isForeignKey()) throw new IllegalArgumentException("La columa no es una FOREING KEY");
+        Table table = namespace.getTable(column.getReferencedTable());
+        if (table == null) throw new IllegalArgumentException("No existe la tabla referencia: " + column.getReferencedTable());
+        return table;
+    }
+
+    public int getColumnIndex(String columnName) {
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            if (schema.getColumns().get(i).getName().equals(columnName)) {
+                return i;
+            }
+        }
+        throw new IllegalArgumentException("No existe la columna: " + columnName);
     }
 
     /* VALIDATE RECORD ========================= */
@@ -321,6 +464,17 @@ public class Table {
 
     public FreeSpaceManager getFreeSpaceManager() {
         return freeSpaceManager;
+    }
+
+    public boolean hasForeignKeyReference(String referencedTable, String referencedColumn, Object value) throws IOException {
+        for (int i = 0; i < schema.getColumns().size(); i++) {
+            ColumnDefinition column = schema.getColumns().get(i);
+            if (!column.isForeignKey()) continue;
+            if (!column.getReferencedTable().equals(referencedTable)) continue;
+            if (!column.getReferencedColumn().equals(referencedColumn)) continue;
+            if (foreignKeyManager.hasReferences(i, value)) return true;
+        }
+        return false;
     }
 
     public void close() throws IOException {

@@ -17,6 +17,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -25,15 +26,13 @@ import java.util.List;
  */
 public class App {
 
-    public static void main(String[] args) throws Exception {
+    static void main() throws IOException {
 
-        DataBase db = DataBase.create("universidad");
+        // =========================================================
+        // 1. DEFINICIÓN DEL SCHEMA
+        // =========================================================
 
-        Namespace namespace =
-                db.createNamespace("public");
-
-        Schema schema =
-                new Schema("persona");
+        Schema schema = new Schema("users");
 
         schema.addColumn(
                 new ColumnDefinition(
@@ -43,189 +42,98 @@ public class App {
                         false,
                         true,
                         false,
-                        true
+                        true,
+                        null,
+                        null
                 )
         );
 
         schema.addColumn(
                 new ColumnDefinition(
-                        "nombre",
+                        "name",
                         DataType.STRING,
-                        100,
+                        50,
                         false,
                         false,
                         false,
-                        false
+                        false,
+                        null,
+                        null
                 )
         );
 
         schema.addColumn(
                 new ColumnDefinition(
-                        "email",
-                        DataType.STRING,
-                        150,
+                        "age",
+                        DataType.INT,
+                        null,
                         true,
                         false,
                         false,
-                        true
+                        false,
+                        null,
+                        null
                 )
         );
 
         schema.addColumn(
                 new ColumnDefinition(
-                        "dni",
-                        DataType.STRING,
-                        20,
+                        "active",
+                        DataType.BOOLEAN,
+                        null,
                         false,
                         false,
                         false,
-                        true
+                        false,
+                        null,
+                        null
                 )
         );
 
-        Table table =
-                namespace.createTable(schema);
+        schema.validate();
 
-        // =====================================================
-        // INSERT 1
-        // =====================================================
+        // =========================================================
+        // 2. ESTRUCTURA FÍSICA DE LA BASE
+        // =========================================================
 
-        Record record1 =
-                new Record(schema);
+        Path databasePath = Path.of("database");
+        Path tablePath = databasePath.resolve(schema.getTableName());
 
-        record1.set(0, 1);
-        record1.set(1, "Nestor");
-        record1.set(2, "nestor@gmail.com");
-        record1.set(3, "12345678");
+        Files.createDirectories(tablePath);
 
-        table.insert(record1);
+        Path schemaPath = tablePath.resolve("schema");
+        Path dataPath = tablePath.resolve("data.nst");
+        Path indexPath = tablePath.resolve("index.idx");
 
-        System.out.println("INSERT 1 OK");
+        System.out.println();
+        System.out.println("=== DATABASE ===");
+        System.out.println("Database : " + databasePath.toAbsolutePath());
+        System.out.println("Table    : " + tablePath.toAbsolutePath());
+        System.out.println("Schema   : " + schemaPath.toAbsolutePath());
+        System.out.println("Data     : " + dataPath.toAbsolutePath());
+        System.out.println("Index    : " + indexPath.toAbsolutePath());
 
+        // =========================================================
+        // 3. MOSTRAR EL SCHEMA
+        // =========================================================
 
-        // =====================================================
-        // INSERT 2
-        // Mismo email -> DEBE FALLAR
-        // =====================================================
+        System.out.println();
+        System.out.println("=== SCHEMA ===");
+        System.out.println("Tabla: " + schema.getTableName());
 
-        Record record2 =
-                new Record(schema);
-
-        record2.set(0, 2);
-        record2.set(1, "Juan");
-        record2.set(2, "nestor@gmail.com");
-        record2.set(3, "87654321");
-
-        try {
-
-            table.insert(record2);
-
+        for (ColumnDefinition column : schema.getColumns()) {
             System.out.println(
-                    "ERROR: se permitió email duplicado"
-            );
-
-        } catch (IllegalArgumentException e) {
-
-            System.out.println(
-                    "OK: email duplicado rechazado"
-            );
-
-            System.out.println(
-                    e.getMessage()
+                    column.getName()
+                            + " -> "
+                            + column.getType()
+                            + " | length=" + column.getLength()
+                            + " | nullable=" + column.isNullable()
+                            + " | primaryKey=" + column.isPrimaryKey()
+                            + " | unique=" + column.isUnique()
             );
         }
 
-
-        // =====================================================
-        // INSERT 3
-        // Mismo DNI -> DEBE FALLAR
-        // =====================================================
-
-        Record record3 =
-                new Record(schema);
-
-        record3.set(0, 3);
-        record3.set(1, "Pedro");
-        record3.set(2, "pedro@gmail.com");
-        record3.set(3, "12345678");
-
-        try {
-
-            table.insert(record3);
-
-            System.out.println(
-                    "ERROR: se permitió DNI duplicado"
-            );
-
-        } catch (IllegalArgumentException e) {
-
-            System.out.println(
-                    "OK: DNI duplicado rechazado"
-            );
-
-            System.out.println(
-                    e.getMessage()
-            );
-        }
-
-
-        // =====================================================
-        // INSERT 4
-        // Email NULL -> DEBE ENTRAR
-        // =====================================================
-
-        Record record4 =
-                new Record(schema);
-
-        record4.set(0, 4);
-        record4.set(1, "Maria");
-        record4.set(2, null);
-        record4.set(3, "11111111");
-
-        table.insert(record4);
-
-        System.out.println(
-                "INSERT 4 OK - email NULL"
-        );
-
-
-        // =====================================================
-        // INSERT 5
-        // Otro email NULL -> TAMBIÉN DEBE ENTRAR
-        // =====================================================
-
-        Record record5 =
-                new Record(schema);
-
-        record5.set(0, 5);
-        record5.set(1, "Ana");
-        record5.set(2, null);
-        record5.set(3, "22222222");
-
-        table.insert(record5);
-
-        System.out.println(
-                "INSERT 5 OK - segundo email NULL"
-        );
-
-
-        // =====================================================
-        // INSERT 6
-        // Todo diferente -> DEBE ENTRAR
-        // =====================================================
-
-        Record record6 =
-                new Record(schema);
-
-        record6.set(0, 6);
-        record6.set(1, "Carlos");
-        record6.set(2, "carlos@gmail.com");
-        record6.set(3, "33333333");
-
-        table.insert(record6);
-
-        System.out.println(
-                "INSERT 6 OK"
-        );
+        System.out.println();
+        System.out.println("Estructura física creada correctamente.");
     }
 }
