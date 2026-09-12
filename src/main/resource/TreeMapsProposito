@@ -1,0 +1,29 @@
+FreeSpaceMap
+    │
+    └── espacio → páginas
+                   │
+                   ▼
+              encontrar dónde
+              INSERTAR
+
+
+B+Tree
+    │
+    └── key → RecordPointer
+                   │
+                   ▼
+              encontrar dónde
+              LEER
+
+
+             B+Tree
+                │
+        key → RecordPointer
+                │
+                ▼
+        pageId + slotId
+                │
+                ▼
+             data.nst
+
+

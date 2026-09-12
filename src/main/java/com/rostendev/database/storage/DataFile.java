@@ -68,15 +68,22 @@ public class DataFile implements Closeable {
         /* Buscamos una página existente que pueda almacenar el registro.*/
         Page page = findPageForInsert(recordData);
 
+        boolean newPage = false;
         /*No encontramos ninguna página disponible. Creamos una nueva.*/
-        if (page == null) page = new Page(getPageCount());
-
+        if (page == null) {
+            page = new Page(getPageCount());
+            newPage = true;
+        }
 
         /*Page se encarga de: reutilizar un slot libre, o crear un slot nuevo.*/
         RecordPointer pointer = page.insert(recordData);
 
         /* Persistimos inmediatamente la página. */
         write(page);
+
+        int insertableSpace = page.getInsertableSpace();
+        if (newPage) freeSpaceMap.addPage(page.getPageId(), insertableSpace);
+        else freeSpaceMap.updatePage(page.getPageId(), insertableSpace);
         return pointer;
     }
 
@@ -113,6 +120,41 @@ public class DataFile implements Closeable {
         return pageSerializer.deserialize(bytes, pageId);
     }
 
+    public Record read(RecordPointer pointer) throws IOException {
+        if (pointer == null)throw new IllegalArgumentException("pointer no puede ser null");
+        Page page = read(pointer.getPageId());
+        if (page == null) throw new IOException("La página no existe: " + pointer.getPageId());
+        byte[] recordData = page.read(pointer.getSlotId());
+        return recordSerializer.deserialize(recordData, schema);
+    }
+
+    public void delete(RecordPointer pointer) throws IOException {
+        if (pointer == null) throw new IllegalArgumentException("pointer no puede ser null");
+        Page page = read(pointer.getPageId());
+        if (page == null) throw new IOException("La pagina no existe: " + pointer.getPageId());
+        // Page.delete() se encarga de:
+        // - compactar el área de registros
+        // - actualizar offsets
+        // - liberar el slot
+        page.delete(pointer.getSlotId());
+        // Persistimos la página modificada.
+        write(page);
+        freeSpaceMap.updatePage(page.getPageId(), page.getInsertableSpace());
+    }
+
+    public void update(RecordPointer pointer, Record record) throws IOException {
+        if (pointer == null) throw new IllegalArgumentException("pointer no puede ser null");
+        if (record == null) throw new IllegalArgumentException("record no puede ser null");
+        if (record.getSchema() != schema) throw new IllegalArgumentException("El record pertenece a otro schema");
+        Page page = read(pointer.getPageId());
+        if (page == null) throw new IllegalArgumentException("La pagina no existe");
+        byte[] newData = recordSerializer.serialize(record);
+        page.update(pointer.getSlotId(), newData);
+        // Persistimos la página modificada.
+        write(page);
+        freeSpaceMap.updatePage(page.getPageId(), page.getInsertableSpace());
+    }
+
     /**
      * Indica cuántas páginas físicas existen
      * actualmente en el archivo.
@@ -134,18 +176,28 @@ public class DataFile implements Closeable {
     }
 
     private Page findPageForInsert(byte[] recordData) throws IOException {
-        int pageCount = getPageCount();
-        for (int pageId = 0; pageId < pageCount; pageId++) {
-            Page page = read(pageId);
-            if (page.canFit(recordData.length)) return page;
+        int pageId = freeSpaceMap.findPage(recordData.length);
+        if (pageId == -1) return null;
+        Page page = read(pageId);
+        if (page == null) throw new IOException("El FSM referencia una pagina inexistente: " + pageId);
+        /* Validación defensiva.
+         * El FSM es una estructura auxiliar.
+         * La Page sigue siendo la autoridad real.*/
+        if (!page.canFit(recordData.length)) {
+            /*El FSM quedó desactualizado. Lo corregimos.*/
+            freeSpaceMap.updatePage(pageId, page.getInsertableSpace());
+            return  findPageForInsert(recordData);
         }
-        return null;
+        return  page;
     }
 
     /**cierra el archivo**/
     @Override
     public void close() throws IOException {
-        file.close();
+        try{
+            file.close();
+        }finally {
+            freeSpaceMap.close();
+        }
     }
-
 }

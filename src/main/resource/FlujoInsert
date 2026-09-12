@@ -1,0 +1,24 @@
+INSERT
+  │
+  ▼
+FSM.findPage()
+  │
+  ├── encontró página ──────┐
+  │                         │
+  └── no encontró           │
+       │                    │
+       ▼                    ▼
+    nueva Page          Page existente
+       │                    │
+       └────────┬───────────┘
+                ▼
+           page.insert()
+                │
+                ▼
+           write(data.nst)
+                │
+                ▼
+       page.getInsertableSpace()
+                │
+                ▼
+             FSM

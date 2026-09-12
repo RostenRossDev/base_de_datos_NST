@@ -28,112 +28,11 @@ public class App {
 
     static void main() throws IOException {
 
-        // =========================================================
-        // 1. DEFINICIÓN DEL SCHEMA
-        // =========================================================
-
-        Schema schema = new Schema("users");
-
-        schema.addColumn(
-                new ColumnDefinition(
-                        "id",
-                        DataType.INT,
-                        null,
-                        false,
-                        true,
-                        false,
-                        true,
-                        null,
-                        null
-                )
-        );
-
-        schema.addColumn(
-                new ColumnDefinition(
-                        "name",
-                        DataType.STRING,
-                        50,
-                        false,
-                        false,
-                        false,
-                        false,
-                        null,
-                        null
-                )
-        );
-
-        schema.addColumn(
-                new ColumnDefinition(
-                        "age",
-                        DataType.INT,
-                        null,
-                        true,
-                        false,
-                        false,
-                        false,
-                        null,
-                        null
-                )
-        );
-
-        schema.addColumn(
-                new ColumnDefinition(
-                        "active",
-                        DataType.BOOLEAN,
-                        null,
-                        false,
-                        false,
-                        false,
-                        false,
-                        null,
-                        null
-                )
-        );
-
-        schema.validate();
-
-        // =========================================================
-        // 2. ESTRUCTURA FÍSICA DE LA BASE
-        // =========================================================
-
-        Path databasePath = Path.of("database");
-        Path tablePath = databasePath.resolve(schema.getTableName());
-
-        Files.createDirectories(tablePath);
-
-        Path schemaPath = tablePath.resolve("schema");
-        Path dataPath = tablePath.resolve("data.nst");
-        Path indexPath = tablePath.resolve("index.idx");
-
-        System.out.println();
-        System.out.println("=== DATABASE ===");
-        System.out.println("Database : " + databasePath.toAbsolutePath());
-        System.out.println("Table    : " + tablePath.toAbsolutePath());
-        System.out.println("Schema   : " + schemaPath.toAbsolutePath());
-        System.out.println("Data     : " + dataPath.toAbsolutePath());
-        System.out.println("Index    : " + indexPath.toAbsolutePath());
-
-        // =========================================================
-        // 3. MOSTRAR EL SCHEMA
-        // =========================================================
-
-        System.out.println();
-        System.out.println("=== SCHEMA ===");
-        System.out.println("Tabla: " + schema.getTableName());
-
-        for (ColumnDefinition column : schema.getColumns()) {
-            System.out.println(
-                    column.getName()
-                            + " -> "
-                            + column.getType()
-                            + " | length=" + column.getLength()
-                            + " | nullable=" + column.isNullable()
-                            + " | primaryKey=" + column.isPrimaryKey()
-                            + " | unique=" + column.isUnique()
-            );
-        }
-
-        System.out.println();
-        System.out.println("Estructura física creada correctamente.");
-    }
+        Schema schema = new Schema("users"); schema.addColumn(new ColumnDefinition( "id", DataType.INT, null, false, true, false, true, null, null )); schema.addColumn(new ColumnDefinition( "name", DataType.STRING, 50, false, false, false, false, null, null )); schema.addColumn(new ColumnDefinition( "age", DataType.INT, null, true, false, false, false, null, null )); schema.addColumn(new ColumnDefinition( "active", DataType.BOOLEAN, null, false, false, false, false, null, null )); schema.validate();
+        Path tablePath = Path.of("database", "users"); Files.createDirectories(tablePath); Path dataPath = tablePath.resolve("data.nst"); Path fsmPath = Path.of(dataPath + ".fsm"); Files.deleteIfExists(dataPath); Files.deleteIfExists(fsmPath); RecordPointer pointer1; RecordPointer pointer2;
+        try (DataFile dataFile = new DataFile(dataPath.toString(), schema)) { Record user1 = new Record(schema); user1.set(0, 1); user1.set(1, "Nestor"); user1.set(2, 35); user1.set(3, true); Record user2 = new Record(schema); user2.set(0, 2); user2.set(1, "Juan"); user2.set(2, 30); user2.set(3, false); pointer1 = dataFile.insert(user1); pointer2 = dataFile.insert(user2); System.out.println("=== INSERT ==="); System.out.println("User 1 -> " + pointer1); printRecord(dataFile.read(pointer1)); System.out.println(); System.out.println("User 2 -> " + pointer2); printRecord(dataFile.read(pointer2)); }
+        try (DataFile dataFile = new DataFile(dataPath.toString(), schema)) { dataFile.delete(pointer2); System.out.println(); System.out.println("=== DELETE ==="); System.out.println("Eliminado: " + pointer2); System.out.println( "Slot eliminado: " + pointer2.getSlotId() ); }
+        try (DataFile dataFile = new DataFile(dataPath.toString(), schema)) { System.out.println(); System.out.println("=== AFTER REOPEN ==="); Record user1 = dataFile.read(pointer1); System.out.println("User 1 sigue existiendo:"); printRecord(user1); try { dataFile.read(pointer2); System.out.println( "ERROR: el registro eliminado todavía puede leerse." ); } catch (IllegalArgumentException e) { System.out.println( "OK: el slot " + pointer2.getSlotId() + " está libre." ); } }
+        try (DataFile dataFile = new DataFile(dataPath.toString(), schema)) { Record user3 = new Record(schema); user3.set(0, 3); user3.set(1, "Pedro"); user3.set(2, 28); user3.set(3, true); RecordPointer pointer3 = dataFile.insert(user3); System.out.println(); System.out.println("=== INSERT AFTER DELETE ==="); System.out.println("User 3 -> " + pointer3); printRecord(dataFile.read(pointer3)); System.out.println(); System.out.println( "¿Reutilizó el slot de Juan? " + (pointer3.getSlotId() == pointer2.getSlotId()) ); } }
+    private static void printRecord(Record record) { System.out.println("Record:"); for (int i = 0; i < record.getSchema().getColumns().size(); i++) { ColumnDefinition column = record.getSchema().getColumns().get(i); System.out.println( " " + column.getName() + " = " + record.get(i) ); } }
 }
