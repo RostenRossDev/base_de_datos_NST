@@ -31,7 +31,6 @@ public class DatabasePath {
     }
 
     public DatabasePath(String dbName, String namespaceName) {
-
         validateName(dbName, "databaseName");
         validateName(namespaceName, "namespaceName");
         this.databaseName = dbName;

@@ -1,14 +1,45 @@
 package com.rostendev;
 
+
+import com.rostendev.database.database.DataBase;
+
+import com.rostendev.database.database.DatabasePath;
+import com.rostendev.database.index.IndexEntry;
+
+import com.rostendev.database.schema.SchemaFile;
+
+import com.rostendev.database.storage.freeSpaceManager.FreeSpaceEntry;
+
+import com.rostendev.database.storage.freeSpaceManager.FreeSpaceMap;
+
 import com.rostendev.database.schema.DataType;
+
 import com.rostendev.database.records.Record;
+
 import com.rostendev.database.schema.ColumnDefinition;
+
 import com.rostendev.database.schema.Schema;
+
 import com.rostendev.database.storage.*;
 
+import com.rostendev.database.table.Table;
+
+
+import javax.swing.table.TableCellEditor;
+import javax.xml.crypto.Data;
+
+import java.io.File;
+
 import java.io.IOException;
+
 import java.nio.file.Files;
+
 import java.nio.file.Path;
+
+import java.util.ArrayList;
+
+import java.util.List;
+
 
 /**
  * Hello world!
@@ -16,349 +47,208 @@ import java.nio.file.Path;
  */
 public class App {
 
+    static String db ="test-db", namespace ="test", table ="users";
+    static DatabasePath databasePath;
+
     static void main() throws IOException {
 
-        // =========================================================
-        // SCHEMA
-        // =========================================================
-
-        Schema schema = new Schema("users");
+        DataBase db = abrirDB();
+        Schema schema = new Schema(table);
+        Namespace namespace = new Namespace(databasePath, databasePath.getNamespaceName());
+        schema.addColumn(new ColumnDefinition("id",DataType.INT,
+                        null,false,
+                        true,false,
+                        false,null,null
+                )
+        );
 
         schema.addColumn(
-                new ColumnDefinition(
-                        "id",
-                        DataType.INT,
-                        null,
-                        false,
-                        true,
-                        false,
-                        true,
-                        null,
+                new ColumnDefinition("name",DataType.STRING,
+                        100,false,
+                        false,false,
+                        false,null,
                         null
                 )
         );
 
         schema.addColumn(
-                new ColumnDefinition(
-                        "name",
-                        DataType.STRING,
-                        50,
-                        false,
-                        false,
-                        false,
-                        false,
-                        null,
-                        null
+                new ColumnDefinition("email",DataType.STRING,
+                        100,false,
+                        false,false,
+                        true,null,null
                 )
         );
-
-        schema.addColumn(
-                new ColumnDefinition(
-                        "age",
-                        DataType.INT,
-                        null,
-                        true,
-                        false,
-                        false,
-                        false,
-                        null,
-                        null
-                )
-        );
-
-        schema.addColumn(
-                new ColumnDefinition(
-                        "active",
-                        DataType.BOOLEAN,
-                        null,
-                        false,
-                        false,
-                        false,
-                        false,
-                        null,
-                        null
-                )
-        );
-
-        schema.validate();
 
         // =========================================================
-        // PATHS
+        // TABLE
         // =========================================================
+        Table table = db.openOrCreateTable(schema, databasePath.getNamespaceName());
 
-        Path tablePath = Path.of("database", "users");
+//        Table table = new Table(namespace,databasePath.getDatabaseName(),schema);
 
-        Files.createDirectories(tablePath);
-
-        Path dataPath = tablePath.resolve("data.nst");
-        Path fsmPath = Path.of(dataPath + ".fsm");
-
-        Files.deleteIfExists(dataPath);
-        Files.deleteIfExists(fsmPath);
-
-        RecordPointer pointer1;
-        RecordPointer pointer2;
 
         // =========================================================
         // INSERT
         // =========================================================
 
-        try (DataFile dataFile =
-                     new DataFile(dataPath.toString(), schema)) {
+        System.out.println();
+        System.out.println("INSERT");
 
-            Record user1 = new Record(schema);
+        Record user1 = new Record(schema);
 
-            user1.set(0, 1);
-            user1.set(1, "Nestor");
-            user1.set(2, 35);
-            user1.set(3, true);
+        user1.set(0, 1);
+        user1.set(1, "Nestor");
+        user1.set(2, "nestor@test.com");
 
-            Record user2 = new Record(schema);
+        Record pointer1 = table.find(user1.get(0));
 
-            user2.set(0, 2);
-            user2.set(1, "Juan");
-            user2.set(2, 30);
-            user2.set(3, false);
+        System.out.println(
+                "User 1 -> " + pointer1
+        );
 
-            pointer1 = dataFile.insert(user1);
-            pointer2 = dataFile.insert(user2);
+        Record user2 = new Record(schema);
 
-            System.out.println("================================");
-            System.out.println("INSERT");
-            System.out.println("================================");
+        user2.set(0, 2);
+        user2.set(1, "Juan");
+        user2.set(2, "juan@test.com");
 
-            System.out.println("User 1 -> " + pointer1);
-            printRecord(dataFile.read(pointer1));
+        Record pointer2 = table.find(user2.get(0));
 
-            System.out.println();
+        System.out.println(
+                "User 2 -> " + pointer2
+        );
 
-            System.out.println("User 2 -> " + pointer2);
-            printRecord(dataFile.read(pointer2));
-        }
-
-        // =========================================================
-        // DELETE
-        // =========================================================
-
-        try (DataFile dataFile =
-                     new DataFile(dataPath.toString(), schema)) {
-
-            dataFile.delete(pointer2);
-
-            System.out.println();
-            System.out.println("================================");
-            System.out.println("DELETE");
-            System.out.println("================================");
-
-            System.out.println(
-                    "Eliminado: " + pointer2
-            );
-
-            System.out.println(
-                    "Slot eliminado: " +
-                            pointer2.getSlotId()
-            );
-        }
-
-        // =========================================================
-        // REOPEN
-        // =========================================================
-
-        try (DataFile dataFile =
-                     new DataFile(dataPath.toString(), schema)) {
-
-            System.out.println();
-            System.out.println("================================");
-            System.out.println("AFTER REOPEN");
-            System.out.println("================================");
-
-            Record user1 =
-                    dataFile.read(pointer1);
-
-            System.out.println(
-                    "User 1 sigue existiendo:"
-            );
-
-            printRecord(user1);
-
-            try {
-
-                dataFile.read(pointer2);
-
-                System.out.println(
-                        "ERROR: el registro eliminado " +
-                                "todavía puede leerse."
-                );
-
-            } catch (IllegalArgumentException e) {
-
-                System.out.println(
-                        "OK: el slot " +
-                                pointer2.getSlotId() +
-                                " está libre."
-                );
-            }
-        }
-
-        // =========================================================
-        // INSERT AFTER DELETE
-        // =========================================================
-
-        try (DataFile dataFile =
-                     new DataFile(dataPath.toString(), schema)) {
-
-            Record user3 = new Record(schema);
-
-            user3.set(0, 3);
-            user3.set(1, "Pedro");
-            user3.set(2, 28);
-            user3.set(3, true);
-
-            RecordPointer pointer3 =
-                    dataFile.insert(user3);
-
-            System.out.println();
-            System.out.println("================================");
-            System.out.println("INSERT AFTER DELETE");
-            System.out.println("================================");
-
-            System.out.println(
-                    "User 3 -> " + pointer3
-            );
-
-            printRecord(
-                    dataFile.read(pointer3)
-            );
-
-            System.out.println();
-
-            System.out.println(
-                    "¿Reutilizó el slot de Juan? " +
-                            (
-                                    pointer3.getSlotId()
-                                            ==
-                                            pointer2.getSlotId()
-                            )
-            );
-        }
+//        // =========================================================
+//        // READ
+//        // =========================================================
+//
+//        System.out.println();
+//        System.out.println("READ");
+//
+//        Record result = table.read(pointer1);
+//
+//        System.out.println(
+//                "id    = " + result.get(0)
+//        );
+//
+//        System.out.println(
+//                "name  = " + result.get(1)
+//        );
+//
+//        System.out.println(
+//                "email = " + result.get(2)
+//        );
 
         // =========================================================
         // UPDATE PEQUEÑO
         // =========================================================
 
-        try (DataFile dataFile =
-                     new DataFile(dataPath.toString(), schema)) {
+        System.out.println();
+        System.out.println("UPDATE PEQUEÑO");
 
-            Record user1Updated =
-                    new Record(schema);
+        Record smallUpdate = new Record(schema);
 
-            user1Updated.set(0, 1);
-            user1Updated.set(1, "Nes");
-            user1Updated.set(2, 35);
-            user1Updated.set(3, true);
+        smallUpdate.set(0, 1);
+        smallUpdate.set(1, "Nes");
+        smallUpdate.set(2, "nestor@test.com");
 
-            dataFile.update(
-                    pointer1,
-                    user1Updated
-            );
+        table.update(smallUpdate);
 
-            System.out.println();
-            System.out.println("================================");
-            System.out.println("UPDATE PEQUEÑO");
-            System.out.println("================================");
+        Record afterSmallUpdate = table.find(smallUpdate.get(0));
 
-            System.out.println(
-                    "Pointer: " + pointer1
-            );
-
-            printRecord(
-                    dataFile.read(pointer1)
-            );
-        }
+        System.out.println(
+                "name = " + afterSmallUpdate.get(1)
+        );
 
         // =========================================================
         // UPDATE GRANDE
         // =========================================================
 
-        try (DataFile dataFile =
-                     new DataFile(dataPath.toString(), schema)) {
+        System.out.println();
+        System.out.println("UPDATE GRANDE");
 
-            Record user1Updated =
-                    new Record(schema);
+        Record bigUpdate = new Record(schema);
 
-            user1Updated.set(0, 1);
+        bigUpdate.set(0, 1);
 
-            user1Updated.set(
-                    1,
-                    "NestorXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-            );
+        bigUpdate.set(1,"NestorXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
 
-            user1Updated.set(2, 35);
-            user1Updated.set(3, true);
+        bigUpdate.set(2,"nestor@test.com");
 
-            dataFile.update(
-                    pointer1,
-                    user1Updated
-            );
+        table.update(bigUpdate);
 
-            System.out.println();
-            System.out.println("================================");
-            System.out.println("UPDATE GRANDE");
-            System.out.println("================================");
+        Record afterBiglUpdate = table.find(bigUpdate.get(0));
+        System.out.println(
+                "name = " + afterBiglUpdate.get(1)
+        );
+        /*
+         * IMPORTANTE:
+         *
+         * Table.update() actualmente no devuelve RecordPointer.
+         * Por lo tanto, no vamos a inventar un método para obtener
+         * el nuevo puntero.
+         *
+         * El objetivo acá es comprobar que el update funciona.
+         */
 
-            System.out.println(
-                    "Pointer original: " + pointer1
-            );
+        System.out.println(
+                "Update grande ejecutado."
+        );
 
-            try {
+        // =========================================================
+        // DELETE
+        // =========================================================
 
-                Record updated =
-                        dataFile.read(pointer1);
+        System.out.println();
+        System.out.println("DELETE");
 
-                System.out.println(
-                        "Registro encontrado en el pointer original:"
-                );
 
-                printRecord(updated);
+        table.delete(table.getPointer(pointer2.get(0)));
 
-            } catch (Exception e) {
+        System.out.println(
+                "User 2 eliminado."
+        );
 
-                System.out.println(
-                        "El registro ya no está en el pointer original."
-                );
+        // =========================================================
+        // READ DESPUÉS DEL UPDATE
+        // =========================================================
 
-                System.out.println(
-                        "Esto es esperable si DataFile.update() " +
-                                "lo movió físicamente."
-                );
-            }
-        }
+        System.out.println();
+        System.out.println("READ DESPUES DEL UPDATE");
+
+        /*
+         * Si el registro fue movido físicamente por el update grande,
+         * pointer1 puede haber dejado de ser válido.
+         *
+         * Por eso no hacemos table.read(pointer1) acá.
+         */
+
+        System.out.println(
+                "Update grande completado correctamente."
+        );
+
+        // =========================================================
+        // CLOSE
+        // =========================================================
+
+        table.close();
 
         System.out.println();
         System.out.println("================================");
-        System.out.println("PRUEBA FINALIZADA");
+        System.out.println("       TEST FINALIZADO");
         System.out.println("================================");
+
     }
 
-    private static void printRecord(Record record) {
-
-        System.out.println("Record:");
-
-        for (int i = 0;
-             i < record.getSchema().getColumns().size();
-             i++) {
-
-            ColumnDefinition column =
-                    record.getSchema()
-                            .getColumns()
-                            .get(i);
-
-            System.out.println(
-                    "  " +
-                            column.getName() +
-                            " = " +
-                            record.get(i)
-            );
-        }
+    private static DataBase abrirDB() throws IOException {
+        databasePath = new DatabasePath(db, namespace, table);
+        DataBase db = DataBase.openOrCreate(databasePath.getDatabaseName(), databasePath.getNamespaceName(), databasePath.getTableName());
+        return db;
     }
-     }
+
+    private static DataBase crearDB() throws IOException {
+        databasePath = new DatabasePath(db, namespace);
+        DataBase db = DataBase.openOrCreate(databasePath.getDatabaseName(), databasePath.getNamespaceName(), null);
+        return db;
+    }
+}

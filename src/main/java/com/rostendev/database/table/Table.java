@@ -24,7 +24,6 @@ public class Table {
     private final Schema schema;
     private final DatabasePath databasePath;
     private final DataFile dataFile;
-    private final FreeSpaceManager freeSpaceManager;
     private final BPlusTree index;
     private final int primaryKeyColumn;
     private final IndexManager indexManager;
@@ -49,9 +48,6 @@ public class Table {
         schemaFile.write(schema);
         this.dataFile = new DataFile(databasePath.getDataPath().toString(), schema);
 
-        /*free space*/
-        this.freeSpaceManager = new FreeSpaceManager(dataFile, databasePath.getFsmPath().toString());
-
         /*PRIMARY KEY =========================  */
         this.primaryKeyColumn =  findPrimaryKeyColumn();
 
@@ -71,7 +67,6 @@ public class Table {
         this.schema = schema;
         this.databasePath = databasePath;
         this.dataFile = new DataFile(databasePath.getDataPath().toString(), schema);
-        this.freeSpaceManager = new FreeSpaceManager( dataFile, databasePath.getFsmPath().toString());
         this.primaryKeyColumn = findPrimaryKeyColumn();
         ColumnDefinition primaryKey = schema.getColumns().get(primaryKeyColumn);
         this.index = new BPlusTree(databasePath.getIndexPath(),primaryKey.getType());
@@ -108,29 +103,12 @@ public class Table {
             // UNIQUE nullable permite múltiples NULL
             if (value == null) continue;
             IndexEntry uniqueExisting = indexManager.search(i, value);
-
             if (uniqueExisting != null)
                 throw new IllegalArgumentException("La columna '" +column.getName() +
                                 "' no permite valores duplicados: " +value);
         }
 
-        // SERIALIZAR
-        // =====================================================
-        RecordSerializer serializer = new RecordSerializer();
-        byte[] recrodData = serializer.serialize(record);
-
-        /*Buscamos una pagina donde pueda entrar*/
-        Page page = freeSpaceManager.findPage(recrodData.length);
-
-        /*insertamos el record en la pagina*/
-        RecordPointer pointer = page.insert(recrodData);
-
-        // GUARDAR EN DATA
-        // =====================================================
-//        dataFile.write(page);
-        System.out.println("FSM -> page=" + page.getPageId()+ " freeSpace=" + page.getFreeSpace()
-                        + " insertable=" + page.getInsertableSpace());
-        freeSpaceManager.updatePage(page);
+        RecordPointer pointer = dataFile.insert(record);
 
         // INSERTAR BTREE PRIMARY KEY
         // =====================================================
@@ -179,22 +157,13 @@ public class Table {
     /* READ BY POINTER =========================*/
     public Record read(RecordPointer pointer) throws IOException{
         if (pointer == null) throw new IllegalArgumentException("Poiner no puede ser null");
-        Page page = dataFile.read(pointer.getPageId());
-        if (page == null) throw new IOException("No existe la pagina: " + pointer.getPageId());
-        byte[] recorData = page.read(pointer.getSlotId());
-        RecordSerializer serializer = new RecordSerializer();
-        return serializer.deserialize(recorData, schema);
+        return dataFile.read(pointer);
     }
 
     /*DELETE*/
     public void delete(RecordPointer pointer) throws IOException {
         if (pointer == null) throw new IllegalArgumentException("pointer no puede ser null");
-        Page page = dataFile.read(pointer.getPageId());
-        if (page == null) throw new IOException("No existe la pagina " +pointer.getPageId());
-        byte[] recordData =page.read(pointer.getSlotId());
-        RecordSerializer serializer =new RecordSerializer();
-        Record record =serializer.deserialize(recordData,schema);
-
+        Record record = dataFile.read(pointer);
         // =====================================================
         // PRIMARY KEY
         // =====================================================
@@ -238,52 +207,26 @@ public class Table {
         // =====================================================
         // ELIMINAR REGISTRO FÍSICAMENTE
         // =====================================================
-        page.delete(pointer.getSlotId());
-//        dataFile.write(page);
-        freeSpaceManager.updatePage(page);
-    }
-
-    /*DELETE*/
-    public void delete(int id) throws IOException {
-        /* Buscamos primero el registro en el índice. */
-        IndexEntry entry = index.search(id);
-        if (entry == null) return;
-        RecordPointer pointer = new RecordPointer(entry.getPageNumber(), (short)entry.getSlotNumber());
-        /* Marcamos el slot como libre. */
-        Page page = dataFile.read(pointer.getPageId());
-        if (page == null) throw new IOException("No existe la pagina " + pointer.getPageId());
-        page.delete(pointer.getSlotId());
-//        dataFile.write(page);
+        dataFile.delete(pointer);
     }
 
     public void update(Record record) throws IOException {
-        if (record == null) {
+        if (record == null)
             throw new IllegalArgumentException("record no puede ser null");
-        }
-
-        if (record.getSchema() != schema) {
-            throw new IllegalArgumentException(
-                    "El schema del record no coincide con el schema de la tabla"
-            );
-        }
-
+        if (record.getSchema() != schema)
+            throw new IllegalArgumentException("El schema del record no coincide con el schema de la tabla");
         validateRecord(record);
         Object primaryKey = record.get(primaryKeyColumn);
         IndexEntry entry = index.search(primaryKey);
-        if (entry == null) {
-            throw new IllegalArgumentException(
-                    "No existe un registro con clave primaria: " + primaryKey
-            );
-        }
+        if (entry == null)
+            throw new IllegalArgumentException("No existe un registro con clave primaria: " + primaryKey);
 
         RecordPointer oldPointer = new RecordPointer(entry.getPageNumber(),(short) entry.getSlotNumber());
-        Page oldPage = dataFile.read(oldPointer.getPageId());
-        if (oldPage == null)
-            throw new IOException("No existe la pagina " + oldPointer.getPageId());
-
-        byte[] oldRecordData = oldPage.read(oldPointer.getSlotId());
-        RecordSerializer serializer = new RecordSerializer();
-        Record oldRecord = serializer.deserialize(oldRecordData,schema);
+//        Page oldPage = dataFile.read(oldPointer.getPageId());
+        /* Table necesita el registro anterior para poder
+         * comparar UNIQUE y actualizar las relaciones FK.
+         * DataFile se encarga de leer físicamente el registro.*/
+        Record oldRecord = dataFile.read(oldPointer);
 
         /* La PK es inmutable.
          * Como el registro fue localizado utilizando la nueva PK,
@@ -309,11 +252,8 @@ public class Table {
         }
 
         /*Validamos FOREIGN KEY antes de modificar nada.
-         * Si el nuevo FK apunta a un padre inexistente,
-         * el update completo se rechaza. */
+         * Si el nuevo FK apunta a un padre inexistente, el update completo se rechaza. */
         foreignKeyManager.validate(record);
-        byte[] newRecordData = serializer.serialize(record);
-        boolean sameSize = newRecordData.length <= oldRecordData.length;
 
         /* Eliminamos temporalmente las relaciones FK antiguas.
          * Esto se hace siempre porque incluso si el FK no cambia,
@@ -326,24 +266,16 @@ public class Table {
             foreignKeyManager.delete(i,oldForeignKey,primaryKey);
         }
 
-        RecordPointer newPointer;
-        if (sameSize) {
-            /* El registro entra en el slot actual. */
-            oldPage.update(oldPointer.getSlotId(),newRecordData);
-//            dataFile.write(oldPage);
-            freeSpaceManager.updatePage(oldPage);
-            newPointer = oldPointer;
-        } else {
-            /* El registro ya no entra en el slot actual.
-             * Eliminamos físicamente el registro viejo y lo insertamos nuevamente. */
-            oldPage.delete(oldPointer.getSlotId());
-//            dataFile.write(oldPage);
-            freeSpaceManager.updatePage(oldPage);
-            Page page = freeSpaceManager.findPage(newRecordData.length);
-            newPointer = page.insert(newRecordData);
-//            dataFile.write(page);
-            freeSpaceManager.updatePage(page);
-        }
+        // ACTUALIZACIÓN FÍSICA
+        // =========================================================
+
+        /* Toda la lógica física queda en DataFile:
+         * - Page.update() si el registro entra
+         * - Page.delete() + Page.insert() si crece
+         * - FreeSpaceMap
+         * - escritura en data.nst
+         * DataFile devuelve el pointer final.*/
+        RecordPointer newPointer = dataFile.update(oldPointer, record);
 
         /*
          * Actualizamos índices UNIQUE.
@@ -353,15 +285,23 @@ public class Table {
             if (!column.isUnique() || column.isPrimaryKey()) continue;
             Object oldValue = oldRecord.get(i);
             Object newValue = record.get(i);
-            if (Objects.equals(oldValue, newValue)) continue;
+            /* El valor no cambió. Pero el registro puede haberse movido físicamente.
+             * En ese caso debemos actualizar el pointer del índice.*/
+            if (Objects.equals(oldValue, newValue)) {
+                if (newValue != null && !oldPointer.equals(newPointer)) {
+                    indexManager.delete(i,oldValue);
+                    indexManager.insert(i,newValue,newPointer);
+                }
+                continue;
+            }
             if (oldValue != null) indexManager.delete(i, oldValue);
             if (newValue != null) indexManager.insert(i,newValue,newPointer);
         }
 
-        /*
-         * Si el registro cambió de posición, el índice PK debe
-         * apuntar al nuevo RecordPointer.
-         */
+        // ACTUALIZAR ÍNDICE PRIMARY KEY
+        // =========================================================
+
+        /* Si el registro cambió de posición, el índice PK debe  apuntar al nuevo RecordPointer.*/
         if (!oldPointer.equals(newPointer)) {
             index.delete(primaryKey);
             index.insert(primaryKey,newPointer.getPageId(),newPointer.getSlotId());
@@ -460,10 +400,6 @@ public class Table {
 
     public DataFile getDataFile() {
         return dataFile;
-    }
-
-    public FreeSpaceManager getFreeSpaceManager() {
-        return freeSpaceManager;
     }
 
     public boolean hasForeignKeyReference(String referencedTable, String referencedColumn, Object value) throws IOException {

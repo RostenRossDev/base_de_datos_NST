@@ -184,7 +184,7 @@ public class DataFile implements Closeable {
      * debemos implementar aquí el movimiento hacia
      * otra página.
      */
-    public void update(RecordPointer pointer, Record record) throws IOException {
+    public RecordPointer  update(RecordPointer pointer, Record record) throws IOException {
         if (pointer == null) throw new IllegalArgumentException("pointer no puede ser null");
         if (record == null) throw new IllegalArgumentException("record no puede ser null");
         if (record.getSchema() != schema) throw new IllegalArgumentException("El record pertenece a otro schema");
@@ -199,7 +199,7 @@ public class DataFile implements Closeable {
             oldPage.update(pointer.getSlotId(),newData);
             write(oldPage);
             freeSpaceMap.updatePage(oldPage.getPageId(),oldPage.getInsertableSpace());
-            return;
+            return pointer;
         }
 
         // REGISTRO MÁS GRANDE
@@ -221,12 +221,12 @@ public class DataFile implements Closeable {
             newPhysicalPage = true;
         }
 
-        /* Insertamos el registro nuevo.
-         * IMPORTANTE: como update() actualmente es void, no devolvemos el nuevo RecordPointer. */
-        newPage.insert(newData);
+        /* Insertamos el registro y conservamos el nuevo RecordPointer.*/
+        RecordPointer newPointer = newPage.insert(newData);
         write(newPage);
         if (newPhysicalPage) freeSpaceMap.addPage(newPage.getPageId(),newPage.getInsertableSpace());
         else freeSpaceMap.updatePage(newPage.getPageId(),newPage.getInsertableSpace());
+        return newPointer;
     }
 
     /**
