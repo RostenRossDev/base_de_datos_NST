@@ -5,6 +5,7 @@ import com.rostendev.database.schema.Schema;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.Arrays;
 
 public class Record {
     private final Schema schema;
@@ -70,5 +71,13 @@ public class Record {
 
     public Schema getSchema() {
         return schema;
+    }
+
+    @Override
+    public String toString() {
+        return "Record{" +
+                "schema=" + schema +
+                ", values=" + Arrays.toString(values) +
+                '}';
     }
 }

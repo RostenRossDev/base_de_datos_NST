@@ -103,10 +103,10 @@ public class PageSerializer {
             int offset = in.readInt();
             int length = in.readInt();
 
-            validateSlot(offset, length);
+            validateSlot(offset, length, metadataSize);
             page.addSlot(new Slot(offset, length));
         }
-
+        validateSlotOverlaps(page);
         /*=========================
          * DATOS FÍSICOS
          * =========================
@@ -119,11 +119,30 @@ public class PageSerializer {
         return page;
     }
 
-    private void validateSlot(int offset, int length) throws IOException{
+    private void validateSlot(int offset, int length, int metadataSize) throws IOException{
         if (length == 0) return;
-        if (offset < 0 || offset >= Constants.PAGE_SIZE)
+        if (offset < metadataSize || offset >= Constants.PAGE_SIZE)
             throw new IOException("Offset de slot invalido: " + offset);
         if (length < 0 || offset + length > Constants.PAGE_SIZE)
             throw new IOException("Length de slot invalido: " + length);
+    }
+
+    private void validateSlotOverlaps(Page page) throws IOException {
+        System.out.println("===== PAGE " + page.getPageId() + " SLOTS =====");
+
+        for (int i = 0; i < page.getSlotCount(); i++) {
+            Slot current = page.getSlot(i);
+            if (current.isFree()) continue;
+            int currentStart = current.getOffset();
+            int currentEnd = currentStart + current.getLength();
+            for (int j = i+1; j < page.getSlotCount(); j++) {
+                Slot other = page.getSlot(j);
+                if (other.isFree()) continue;
+                int otherStart = other.getOffset();
+                int otherEnd = otherStart + other.getLength();
+                boolean overlaps = currentStart < otherEnd && otherStart < currentEnd;
+                if (overlaps) throw new IOException("Solapamiento entre slots "+ i + " y " + j);
+            }
+        }
     }
 }

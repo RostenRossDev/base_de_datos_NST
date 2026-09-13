@@ -32,6 +32,7 @@ import java.io.File;
 
 import java.io.IOException;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
 import java.nio.file.Path;
@@ -52,186 +53,88 @@ public class App {
 
     static void main() throws IOException {
 
-        DataBase db = abrirDB();
+        DataBase dataBase = abrirDB();
         Schema schema = new Schema(table);
         Namespace namespace = new Namespace(databasePath, databasePath.getNamespaceName());
-        schema.addColumn(new ColumnDefinition("id",DataType.INT,
-                        null,false,
-                        true,false,
-                        false,null,null
-                )
-        );
-
-        schema.addColumn(
-                new ColumnDefinition("name",DataType.STRING,
-                        100,false,
-                        false,false,
-                        false,null,
-                        null
-                )
-        );
-
-        schema.addColumn(
-                new ColumnDefinition("email",DataType.STRING,
-                        100,false,
-                        false,false,
-                        true,null,null
-                )
-        );
-
-        // =========================================================
-        // TABLE
-        // =========================================================
-        Table table = db.openOrCreateTable(schema, databasePath.getNamespaceName());
-
-//        Table table = new Table(namespace,databasePath.getDatabaseName(),schema);
+        schema.addColumn(new ColumnDefinition("id",DataType.INT,null,false,true,
+                        false,false,null,null));
+        schema.addColumn(new ColumnDefinition("name",DataType.STRING,100,false,
+                        false,false,false,null,null));
+        schema.addColumn(new ColumnDefinition("email",DataType.STRING,100,false,
+                        false,false,true,null,null));
+        Table users = dataBase.openOrCreateTable(schema,databasePath.getNamespaceName());
 
 
-        // =========================================================
-        // INSERT
-        // =========================================================
+        Schema orderSchema = new Schema("orders");
+        orderSchema.addColumn(new ColumnDefinition("id",DataType.INT,null,false,
+                true,false,false,null,null));
 
-        System.out.println();
-        System.out.println("INSERT");
+        orderSchema.addColumn(new ColumnDefinition("user_id",DataType.INT,null,false,
+                false,true,false,"users","id"));
+        Table orders = dataBase.openOrCreateTable(orderSchema,databasePath.getNamespaceName());
 
-        Record user1 = new Record(schema);
 
-        user1.set(0, 1);
-        user1.set(1, "Nestor");
-        user1.set(2, "nestor@test.com");
 
-        Record pointer1 = table.find(user1.get(0));
 
-        System.out.println(
-                "User 1 -> " + pointer1
-        );
+        PageSerializer serializer = new PageSerializer();
 
-        Record user2 = new Record(schema);
+        Page page = new Page(0);
 
-        user2.set(0, 2);
-        user2.set(1, "Juan");
-        user2.set(2, "juan@test.com");
+        page.insert("Registro 1".getBytes(StandardCharsets.UTF_8));
+        page.insert("Registro 2".getBytes(StandardCharsets.UTF_8));
 
-        Record pointer2 = table.find(user2.get(0));
+        byte[] serialized = serializer.serialize(page);
 
-        System.out.println(
-                "User 2 -> " + pointer2
-        );
-
-//        // =========================================================
-//        // READ
-//        // =========================================================
+// El primer slot empieza en el byte 8.
+// Cada slot ocupa 8 bytes:
 //
-//        System.out.println();
-//        System.out.println("READ");
+// 8-11   offset
+// 12-15  length
 //
-//        Record result = table.read(pointer1);
-//
-//        System.out.println(
-//                "id    = " + result.get(0)
-//        );
-//
-//        System.out.println(
-//                "name  = " + result.get(1)
-//        );
-//
-//        System.out.println(
-//                "email = " + result.get(2)
-//        );
+// 16-19  offset del segundo slot
+// 20-23  length del segundo slot
 
-        // =========================================================
-        // UPDATE PEQUEÑO
-        // =========================================================
+// Hacemos que el segundo slot apunte
+// exactamente al mismo lugar que el primero.
+        serialized[16] = serialized[8];
+        serialized[17] = serialized[9];
+        serialized[18] = serialized[10];
+        serialized[19] = serialized[11];
 
-        System.out.println();
-        System.out.println("UPDATE PEQUEÑO");
+        try {
+            Page corrupted = serializer.deserialize(serialized, 0);
 
-        Record smallUpdate = new Record(schema);
+            System.out.println("ERROR: se aceptó una página corrupta.");
 
-        smallUpdate.set(0, 1);
-        smallUpdate.set(1, "Nes");
-        smallUpdate.set(2, "nestor@test.com");
+            System.out.println("Slot 0: offset="
+                    + corrupted.getSlot(0).getOffset()
+                    + ", length="
+                    + corrupted.getSlot(0).getLength());
 
-        table.update(smallUpdate);
+            System.out.println("Slot 1: offset="
+                    + corrupted.getSlot(1).getOffset()
+                    + ", length="
+                    + corrupted.getSlot(1).getLength());
 
-        Record afterSmallUpdate = table.find(smallUpdate.get(0));
+        } catch (IOException e) {
 
-        System.out.println(
-                "name = " + afterSmallUpdate.get(1)
-        );
-
-        // =========================================================
-        // UPDATE GRANDE
-        // =========================================================
-
-        System.out.println();
-        System.out.println("UPDATE GRANDE");
-
-        Record bigUpdate = new Record(schema);
-
-        bigUpdate.set(0, 1);
-
-        bigUpdate.set(1,"NestorXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
-
-        bigUpdate.set(2,"nestor@test.com");
-
-        table.update(bigUpdate);
-
-        Record afterBiglUpdate = table.find(bigUpdate.get(0));
-        System.out.println(
-                "name = " + afterBiglUpdate.get(1)
-        );
-        /*
-         * IMPORTANTE:
-         *
-         * Table.update() actualmente no devuelve RecordPointer.
-         * Por lo tanto, no vamos a inventar un método para obtener
-         * el nuevo puntero.
-         *
-         * El objetivo acá es comprobar que el update funciona.
-         */
-
-        System.out.println(
-                "Update grande ejecutado."
-        );
-
-        // =========================================================
-        // DELETE
-        // =========================================================
-
-        System.out.println();
-        System.out.println("DELETE");
+            System.out.println("OK: se detectó la corrupción.");
+            System.out.println("Mensaje: " + e.getMessage());
+        }
 
 
-        table.delete(table.getPointer(pointer2.get(0)));
 
-        System.out.println(
-                "User 2 eliminado."
-        );
 
-        // =========================================================
-        // READ DESPUÉS DEL UPDATE
-        // =========================================================
-
-        System.out.println();
-        System.out.println("READ DESPUES DEL UPDATE");
-
-        /*
-         * Si el registro fue movido físicamente por el update grande,
-         * pointer1 puede haber dejado de ser válido.
-         *
-         * Por eso no hacemos table.read(pointer1) acá.
-         */
-
-        System.out.println(
-                "Update grande completado correctamente."
-        );
+        printTable(orders);
+        System.out.println("#############################################################");
+        printTable(users);
 
         // =========================================================
         // CLOSE
         // =========================================================
 
-        table.close();
+        users.close();
+        orders.close();
 
         System.out.println();
         System.out.println("================================");
@@ -240,6 +143,13 @@ public class App {
 
     }
 
+    private static void printTable(Table table) throws IOException {
+        for (int i = 0; i < 8 ; i++) {
+            System.out.println(
+                    table.getName()+ " actualizado: " + table.find(i)
+            );
+        }
+    }
     private static DataBase abrirDB() throws IOException {
         databasePath = new DatabasePath(db, namespace, table);
         DataBase db = DataBase.openOrCreate(databasePath.getDatabaseName(), databasePath.getNamespaceName(), databasePath.getTableName());

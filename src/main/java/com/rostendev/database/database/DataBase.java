@@ -16,13 +16,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-public class DataBase implements AutoCloseable{
+public class DataBase implements AutoCloseable {
 
     private final Path databasePath;
     private final String databaseName;
     private final Map<String, Namespace> namespaces = new HashMap<>();
 
-    private DataBase (String databaseName) {
+    private DataBase(String databaseName) {
         validateName(databaseName, "databaseName");
         this.databaseName = databaseName;
         this.databasePath = Paths.get(Constants.ROOT_DIRECTORY, databaseName);
@@ -32,9 +32,9 @@ public class DataBase implements AutoCloseable{
         DatabasePath databasePath = new DatabasePath(databaseName, namespaceName);
         NamespacePath namespacePath = new NamespacePath(databasePath, namespaceName);
         if (Files.exists(namespacePath.getNamespacePath()))
-            throw new IllegalArgumentException("El namespace ya existe: " +namespacePath.getNamespacePath());
+            throw new IllegalArgumentException("El namespace ya existe: " + namespacePath.getNamespacePath());
         Files.createDirectory(namespacePath.getNamespacePath());
-        Namespace namespace =new Namespace(databasePath, namespaceName);
+        Namespace namespace = new Namespace(databasePath, namespaceName);
         namespaces.put(namespaceName, namespace);
         return namespace;
     }
@@ -45,26 +45,25 @@ public class DataBase implements AutoCloseable{
         Namespace namespace = namespaces.get(namespaceName);
         if (namespace == null) throw new IllegalArgumentException("El namespace no existe");
         // construir ruta: database / namespace / table
-        DatabasePath tablePath = new DatabasePath(databaseName,namespaceName,tableName);
+        DatabasePath tablePath = new DatabasePath(databaseName, namespaceName, tableName);
         if (Files.exists(tablePath.getTablePath())) {
-            Table table =new Table(namespace,tablePath,schema);
-            return table;
+            return namespace.openTable(schema);
         }
         //No existe -> crear
         Files.createDirectories(tablePath.getTablePath());
         Table table = new Table(namespace, tablePath, schema);
-        return table;
+        return namespace.createTable(schema);
     }
 
-    public static DataBase create(String databaseName,String namespaceName) throws IOException {
+    public static DataBase create(String databaseName, String namespaceName) throws IOException {
         DataBase dataBase = new DataBase(databaseName);
         if (Files.exists(dataBase.databasePath)) {
-            throw new IllegalArgumentException("La base de datos ya existe: " +dataBase.databasePath);
+            throw new IllegalArgumentException("La base de datos ya existe: " + dataBase.databasePath);
         }
         Files.createDirectories(dataBase.databasePath);
-        DatabasePath namespaceDatabasePath = new DatabasePath(databaseName,namespaceName);
-        Namespace namespace = new Namespace(namespaceDatabasePath,namespaceName);
-        dataBase.namespaces.put(namespaceName,namespace);
+        DatabasePath namespaceDatabasePath = new DatabasePath(databaseName, namespaceName);
+        Namespace namespace = new Namespace(namespaceDatabasePath, namespaceName);
+        dataBase.namespaces.put(namespaceName, namespace);
         return dataBase;
     }
 
@@ -79,7 +78,7 @@ public class DataBase implements AutoCloseable{
         if (tableName == null || tableName.isEmpty())
             throw new IOException("tableName no puede ser nulo");
         if (!Files.isDirectory(dataBase.databasePath))
-            throw new IOException("La ruta de la base de datos no es un directorio: " +dataBase.databasePath);
+            throw new IOException("La ruta de la base de datos no es un directorio: " + dataBase.databasePath);
         return open(databaseName, namespace, tableName);
     }
 
@@ -91,7 +90,8 @@ public class DataBase implements AutoCloseable{
             throw new IOException("La ruta de la base de datos no es un directorio: " + dataBase.databasePath);
         DatabasePath namespaceDatabasePath = new DatabasePath(databaseName, namespaceName, tableName);
         Path namespacePath = namespaceDatabasePath.getDataPath();
-        if (!Files.exists(namespacePath)) throw new IllegalArgumentException("El namespace no existe: " + namespaceName);
+        if (!Files.exists(namespacePath))
+            throw new IllegalArgumentException("El namespace no existe: " + namespaceName);
         Namespace namespace = new Namespace(namespaceDatabasePath, namespaceName);
         dataBase.namespaces.put(namespaceName, namespace);
         return dataBase;

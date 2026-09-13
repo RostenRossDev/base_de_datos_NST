@@ -43,7 +43,9 @@ public class Namespace implements AutoCloseable {
         if (!Files.exists(tablePath.getTablePath())) throw new IllegalArgumentException("La tabla no existe: " + tablePath.getTableName());
         if (!Files.isDirectory(tablePath.getTablePath())) throw new IllegalArgumentException("La ruta de latabla no es un directorio: " + tablePath.getTableName());
 
-        return new Table(this, tablePath.getDatabaseName(), schema);
+        Table table= new Table(this, tablePath.getDatabaseName(), schema);
+        tables.put(schema.getTableName(), table);
+        return table;
     }
 
 
