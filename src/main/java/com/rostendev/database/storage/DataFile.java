@@ -5,6 +5,9 @@ import com.rostendev.database.records.Record;
 import com.rostendev.database.records.RecordSerializer;
 import com.rostendev.database.schema.Schema;
 import com.rostendev.database.storage.freeSpaceManager.FreeSpaceMap;
+import com.rostendev.database.wal.WalFile;
+import com.rostendev.database.wal.WalRecord;
+import com.rostendev.database.wal.WalRecovery;
 
 import java.io.Closeable;
 import java.io.File;
@@ -16,7 +19,11 @@ public class DataFile implements Closeable {
     private final PageSerializer pageSerializer;
     private final Schema schema;
     private final RecordSerializer recordSerializer;
+
     private final FreeSpaceMap freeSpaceMap;
+
+    private final WalFile walFile;
+    private final WalRecovery walRecovery;
 
     public DataFile(String path, Schema schema) throws IOException {
         if (path == null || path.isBlank()) throw new IllegalArgumentException("Path no puede ser nulo o vacio.");
@@ -35,8 +42,10 @@ public class DataFile implements Closeable {
         if (path.endsWith(".data"))
             fsmPath =path.substring(0, path.length() - ".data".length())+ ".fsm";
         else fsmPath = path + ".fsm";
-
         this.freeSpaceMap = new FreeSpaceMap(fsmPath);
+        this.walFile = new WalFile(getWalPath(path));
+        this.walRecovery = new WalRecovery();
+        walRecovery.recover(path, walFile);
         initializeFreeSpaceMap();
     }
 
@@ -111,6 +120,7 @@ public class DataFile implements Closeable {
 
         //Nos posicionamos al final del archivo
         long offset = (long) page.getPageId() * Constants.PAGE_SIZE;
+        persistWal(page, bytes);
         file.seek(offset);
         //despues los datos
         file.write(bytes);
@@ -293,6 +303,22 @@ public class DataFile implements Closeable {
         }
     }
 
+    private void persistWal(Page page, byte[] pageData) throws IOException {
+        WalRecord walRecord = new WalRecord(page.getPageId(), pageData);
+        walFile.append(walRecord);
+        walFile.flush();
+    }
+
+    private String getWalPath(String path) throws IOException {
+        String walPath;
+        if (path.endsWith(".data")) walPath = path.substring(0, path.length() - ".data".length()) + ".wal";
+        else walPath  = path + ".wal";
+        return walPath;
+    }
+
+
+
+
     /**cierra el archivo**/
     @Override
     public void close() throws IOException {
@@ -300,6 +326,7 @@ public class DataFile implements Closeable {
             file.close();
         }finally {
             freeSpaceMap.close();
+            walFile.close();
         }
     }
 }

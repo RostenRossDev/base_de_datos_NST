@@ -86,6 +86,8 @@ public class PageSerializer {
         if (metadataSize > Constants.PAGE_SIZE) throw new IOException("El slot directory excede el tamaño de la pagina");
         if (freeStart < metadataSize || freeStart > Constants.PAGE_SIZE)
             throw new IOException("FreeStart invalido " + freeStart);
+
+        System.out.println("DEBUG freeStart=" + freeStart +" freeEnd=" + freeEnd);
         if (freeEnd < freeStart || freeEnd > Constants.PAGE_SIZE)
             throw new IOException("FreeEnd invalido " + freeEnd);
 
@@ -103,7 +105,7 @@ public class PageSerializer {
             int offset = in.readInt();
             int length = in.readInt();
 
-            validateSlot(offset, length, metadataSize);
+            validateSlot(offset, length, metadataSize, freeEnd);
             page.addSlot(new Slot(offset, length));
         }
         validateSlotOverlaps(page);
@@ -119,12 +121,13 @@ public class PageSerializer {
         return page;
     }
 
-    private void validateSlot(int offset, int length, int metadataSize) throws IOException{
+    private void validateSlot(int offset, int length, int metadataSize, int freeEnd) throws IOException{
         if (length == 0) return;
         if (offset < metadataSize || offset >= Constants.PAGE_SIZE)
             throw new IOException("Offset de slot invalido: " + offset);
         if (length < 0 || offset + length > Constants.PAGE_SIZE)
             throw new IOException("Length de slot invalido: " + length);
+        if (offset < freeEnd) throw new IOException("El slot estafuera de la zona de datos: offset=" + offset + ", freeEnd=" + freeEnd);
     }
 
     private void validateSlotOverlaps(Page page) throws IOException {
