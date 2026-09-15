@@ -13,6 +13,7 @@ import com.rostendev.database.schema.Schema;
 import com.rostendev.database.schema.SchemaFile;
 import com.rostendev.database.storage.*;
 import com.rostendev.database.storage.freeSpaceManager.FreeSpaceManager;
+import com.rostendev.database.wal.TransactionType;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -76,7 +77,7 @@ public class Table {
     }
 
     /*Insert*/
-    public RecordPointer insert(Record record) throws IOException {
+    public RecordPointer insert(Record record, TransactionType type, long transactionId) throws IOException {
         if (record == null) throw new IllegalArgumentException("record no puede ser null");
         if (record.getSchema() != schema) throw new IllegalArgumentException("El record pertenece a otro schema");
 
@@ -108,7 +109,7 @@ public class Table {
                                 "' no permite valores duplicados: " +value);
         }
 
-        RecordPointer pointer = dataFile.insert(record);
+        RecordPointer pointer = dataFile.insert(record, transactionId);
 
         // INSERTAR BTREE PRIMARY KEY
         // =====================================================
@@ -161,7 +162,7 @@ public class Table {
     }
 
     /*DELETE*/
-    public void delete(RecordPointer pointer) throws IOException {
+    public void delete(RecordPointer pointer, TransactionType type, long transactionId) throws IOException {
         if (pointer == null) throw new IllegalArgumentException("pointer no puede ser null");
         Record record = dataFile.read(pointer);
         // =====================================================
@@ -207,10 +208,10 @@ public class Table {
         // =====================================================
         // ELIMINAR REGISTRO FÍSICAMENTE
         // =====================================================
-        dataFile.delete(pointer);
+        dataFile.delete(pointer, transactionId);
     }
 
-    public void update(Record record) throws IOException {
+    public void update(Record record, TransactionType type, long transactionId) throws IOException {
         if (record == null)
             throw new IllegalArgumentException("record no puede ser null");
         if (record.getSchema() != schema)
@@ -275,7 +276,7 @@ public class Table {
          * - FreeSpaceMap
          * - escritura en data.nst
          * DataFile devuelve el pointer final.*/
-        RecordPointer newPointer = dataFile.update(oldPointer, record);
+        RecordPointer newPointer = dataFile.update(oldPointer, record, transactionId);
 
         /*
          * Actualizamos índices UNIQUE.

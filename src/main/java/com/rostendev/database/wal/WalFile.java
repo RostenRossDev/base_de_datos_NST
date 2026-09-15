@@ -1,5 +1,8 @@
 package com.rostendev.database.wal;
 
+import com.rostendev.database.constants.Constants;
+import com.rostendev.database.records.Record;
+
 import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,11 +38,22 @@ public class WalFile implements Closeable{
     public List<WalRecord> readAll() throws IOException {
         List<WalRecord> records = new ArrayList<>();
         file.seek(0);
+        final int HEADER_SIZE = 23;
+        final int CRC_SIZE = 4;
+
         while (file.getFilePointer() < file.length()) {
             long position = file.getFilePointer();
+            long remaining = file.length() - position;
+
+            /* No alcanza ni siquiera para leer el header.
+             * Se considera un registro incompleto al final.  */
+            if (remaining < HEADER_SIZE + CRC_SIZE) {
+                file.setLength(position);
+                file.getFD().sync();
+                break;
+            }
             try {
                 DataInputStream in = new DataInputStream(new InputStream(){
-
                     @Override
                     public int read() throws IOException {
                         return file.read();
@@ -52,7 +66,11 @@ public class WalFile implements Closeable{
                 });
                 records.add(WalRecord.read(in));
             } catch (EOFException e) {
-                throw new IOException("Registro WAL incompleto en offset : " + position, e);
+                /* El registro comenzó pero no llegó completo.
+                 * Como estamos al final del WAL, lo descartamos. */
+                file.setLength(position);
+                file.getFD().sync();
+                break;
             }
         }
         return  records;
@@ -62,6 +80,14 @@ public class WalFile implements Closeable{
         return file.length();
     }
 
+    public void truncate() throws IOException {
+        file.setLength(0);
+        file.getFD().sync();
+    }
+
+    public void sync() throws IOException {
+        file.getFD().sync();
+    }
 
     @Override
     public void close() throws IOException {

@@ -5,6 +5,7 @@ import com.rostendev.database.records.Record;
 import com.rostendev.database.records.RecordSerializer;
 import com.rostendev.database.schema.Schema;
 import com.rostendev.database.storage.freeSpaceManager.FreeSpaceMap;
+import com.rostendev.database.wal.TransactionType;
 import com.rostendev.database.wal.WalFile;
 import com.rostendev.database.wal.WalRecord;
 import com.rostendev.database.wal.WalRecovery;
@@ -13,6 +14,7 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.security.PrivilegedActionException;
 
 public class DataFile implements Closeable {
     private final RandomAccessFile file;
@@ -64,7 +66,7 @@ public class DataFile implements Closeable {
      *
      * @return ubicación física del registro.
      */
-    public RecordPointer insert(Record record) throws IOException {
+    public RecordPointer insert(Record record, long transactionId) throws IOException {
         if (record == null) throw new IllegalArgumentException("record no puede ser null");
         if (record.getSchema() != schema) throw new IllegalArgumentException("El Record pertenece a otro Schema");
         byte[] recordData = recordSerializer.serialize(record);
@@ -95,7 +97,7 @@ public class DataFile implements Closeable {
         RecordPointer pointer = page.insert(recordData);
 
         /* Persistimos inmediatamente la página. */
-        write(page);
+        write(page, transactionId);
 
         /*
          * Actualizamos el FreeSpaceMap después
@@ -112,19 +114,10 @@ public class DataFile implements Closeable {
      *
      * Este método pertenece exclusivamente a DataFile.
      */
-    private  long write(Page page) throws IOException {
-        if (page == null) throw new IllegalArgumentException("page no puede ser null");
+    private  void write(Page page, long transactionId) throws IOException {
         byte[] bytes = pageSerializer.serialize(page);
-        if (bytes.length != Constants.PAGE_SIZE)
-            throw new IOException("La página debe tener exactamente "+Constants.PAGE_SIZE+" bytes");
-
-        //Nos posicionamos al final del archivo
-        long offset = (long) page.getPageId() * Constants.PAGE_SIZE;
-        persistWal(page, bytes);
-        file.seek(offset);
-        //despues los datos
-        file.write(bytes);
-        return offset;
+        persistWal(transactionId, page, bytes);
+        writePage(page);
     }
 
     /**
@@ -170,7 +163,7 @@ public class DataFile implements Closeable {
      * DataFile se encarga de persistirla y actualizar
      * el FreeSpaceMap.
      */
-    public void delete(RecordPointer pointer) throws IOException {
+    public void delete(RecordPointer pointer, long transactionId) throws IOException {
         if (pointer == null) throw new IllegalArgumentException("pointer no puede ser null");
         Page page = read(pointer.getPageId());
         if (page == null) throw new IOException("La pagina no existe: " + pointer.getPageId());
@@ -180,7 +173,7 @@ public class DataFile implements Closeable {
         // - liberar el slot
         page.delete(pointer.getSlotId());
         // Persistimos la página modificada.
-        write(page);
+        write(page, transactionId);
         freeSpaceMap.updatePage(page.getPageId(), page.getInsertableSpace());
     }
 
@@ -194,7 +187,7 @@ public class DataFile implements Closeable {
      * debemos implementar aquí el movimiento hacia
      * otra página.
      */
-    public RecordPointer  update(RecordPointer pointer, Record record) throws IOException {
+    public RecordPointer  update(RecordPointer pointer, Record record,  long transactionId) throws IOException {
         if (pointer == null) throw new IllegalArgumentException("pointer no puede ser null");
         if (record == null) throw new IllegalArgumentException("record no puede ser null");
         if (record.getSchema() != schema) throw new IllegalArgumentException("El record pertenece a otro schema");
@@ -207,7 +200,7 @@ public class DataFile implements Closeable {
         // =========================================================
         if (newData.length <= oldData.length) {
             oldPage.update(pointer.getSlotId(),newData);
-            write(oldPage);
+            write(oldPage, transactionId);
             freeSpaceMap.updatePage(oldPage.getPageId(),oldPage.getInsertableSpace());
             return pointer;
         }
@@ -219,7 +212,7 @@ public class DataFile implements Closeable {
         oldPage .delete(pointer.getSlotId());
 
         // Persistimos la página modificada.
-        write(oldPage );
+        write(oldPage, transactionId);
         freeSpaceMap.updatePage(oldPage .getPageId(), oldPage .getInsertableSpace());
 
         /* Buscamos una página donde entre el nuevo registro.*/
@@ -233,7 +226,7 @@ public class DataFile implements Closeable {
 
         /* Insertamos el registro y conservamos el nuevo RecordPointer.*/
         RecordPointer newPointer = newPage.insert(newData);
-        write(newPage);
+        write(newPage, transactionId);
         if (newPhysicalPage) freeSpaceMap.addPage(newPage.getPageId(),newPage.getInsertableSpace());
         else freeSpaceMap.updatePage(newPage.getPageId(),newPage.getInsertableSpace());
         return newPointer;
@@ -259,13 +252,73 @@ public class DataFile implements Closeable {
         return file.length();
     }
 
+    public void beginTransaction(long transactionId) throws IOException {
+        WalRecord walRecord = WalRecord.begin(transactionId);
+        walFile.append(walRecord);
+        walFile.flush();
+    }
+
+    public void commitTransaction(Long transactionId) throws IOException {
+        WalRecord walRecord = WalRecord.commit(transactionId);
+        walFile.append(walRecord);
+        walFile.flush();
+    }
+
+    public void restorePage(Page page) throws IOException {
+        if (page == null) throw new IllegalArgumentException("page no puede ser null");
+        writePage(page);
+    }
+
+    private void writePage(Page page) throws IOException {
+        byte[] bytes = pageSerializer.serialize(page);
+        long offset = (long) page.getPageId() * Constants.PAGE_SIZE;
+        file.seek(offset);
+        file.write(bytes);
+    }
+
+    private void sync() throws IOException {
+        file.getFD().sync();
+    }
+
+    public Page readPage(int pageId) throws IOException {
+        if (pageId < 0) throw new IllegalArgumentException("pageId no puede ser negativo");
+        long offset = (long) pageId * Constants.PAGE_SIZE;
+        if (offset + Constants.PAGE_SIZE > file.length()) throw new IllegalArgumentException("La pagina no existe: " + pageId);
+        byte[] data = new byte[Constants.PAGE_SIZE];
+        file.seek(offset);
+        file.readFully(data);
+        return pageSerializer.deserialize(data, pageId);
+    }
+
+    public Page copyPage(int pageId) throws IOException {
+        Page page = readPage(pageId);
+        byte[] bytes = pageSerializer.serialize(page);
+        return pageSerializer.deserialize(bytes, pageId);
+    }
+
+    public void truncate(long length) throws IOException {
+        if (length < 0) throw new IllegalArgumentException("length no puede ser negativo");
+        file.setLength(length);
+    }
+
+    public void checkpoint() throws IOException {
+        sync();
+        walFile.truncate();
+    }
+
+    public Page findPageForInsert(Record record) throws IOException {
+        if (record == null) throw new IllegalArgumentException("record no puede ser null");
+        byte[] recordData = recordSerializer.serialize(record);
+        return findPageForInsert(recordData);
+    }
+
     /**
      * Busca una página que pueda almacenar el registro.
      *
      * El FreeSpaceMap se utiliza como índice rápido.
      * La Page sigue siendo la autoridad real.
      */
-    private Page findPageForInsert(byte[] recordData) throws IOException {
+    public Page findPageForInsert(byte[] recordData) throws IOException {
         while (true) {
             int pageId = freeSpaceMap.findPage(recordData.length);
             /*
@@ -277,9 +330,8 @@ public class DataFile implements Closeable {
             /* Validación defensiva.
              * El FSM es una estructura auxiliar.
              * La Page sigue siendo la autoridad real.*/
-            if (page.canFit(recordData.length)) {
-                return page;
-            }
+            if (page.canFit(recordData.length)) return page;
+
             /*
              * El FSM estaba desactualizado.
              * Lo corregimos y volvemos a buscar.
@@ -303,8 +355,8 @@ public class DataFile implements Closeable {
         }
     }
 
-    private void persistWal(Page page, byte[] pageData) throws IOException {
-        WalRecord walRecord = new WalRecord(page.getPageId(), pageData);
+    private void persistWal(long transactionId, Page page, byte[] pageData ) throws IOException {
+        WalRecord walRecord = WalRecord.page(transactionId, page.getPageId(), pageData);
         walFile.append(walRecord);
         walFile.flush();
     }
